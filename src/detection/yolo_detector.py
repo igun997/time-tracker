@@ -3,6 +3,21 @@ from typing import List, Optional, Tuple
 from dataclasses import dataclass, field
 import numpy as np
 
+import os
+import torch
+
+# Fix for PyTorch 2.6+ weights_only default change
+# Set environment variable before importing ultralytics
+os.environ.setdefault('TORCH_FORCE_WEIGHTS_ONLY_LOAD', '0')
+
+# Monkey-patch torch.load to use weights_only=False for YOLO models
+_original_torch_load = torch.load
+def _patched_torch_load(*args, **kwargs):
+    if 'weights_only' not in kwargs:
+        kwargs['weights_only'] = False
+    return _original_torch_load(*args, **kwargs)
+torch.load = _patched_torch_load
+
 try:
     from ultralytics import YOLO
     YOLO_AVAILABLE = True
