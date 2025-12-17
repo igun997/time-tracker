@@ -516,3 +516,51 @@ body {
 ::-webkit-scrollbar-thumb:hover {
     background: var(--text-muted);
 }
+
+/* Hourly Chart */
+.hourly-chart {
+    margin-top: 0.5rem;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.hourly-row {
+    display: flex;
+    align-items: center;
+    padding: 0.25rem 0;
+    gap: 0.5rem;
+}
+
+.hour-label {
+    width: 50px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.class-label {
+    width: 80px;
+    font-size: 0.75rem;
+    color: var(--primary-color);
+}
+
+.hour-bar {
+    height: 16px;
+    background: linear-gradient(90deg, var(--success-color), var(--primary-color));
+    border-radius: 2px;
+    min-width: 4px;
+}
+
+.hour-count {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* Event types for counter mode */
+.event-item.entry {
+    border-color: var(--success-color);
+}
+
+.event-item.exit {
+    border-color: var(--danger-color);
+}

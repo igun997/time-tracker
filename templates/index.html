@@ -71,6 +71,14 @@
                         </select>
                     </div>
                     <div class="form-group">
+                        <label for="tracking-mode">Tracking Mode</label>
+                        <select id="tracking-mode">
+                            <option value="presence">Presence (track duration)</option>
+                            <option value="counter">Counter (count entries/exits)</option>
+                            <option value="both">Both (duration + counts)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label>
                             <input type="checkbox" id="demo-mode"> Demo Mode (no YOLO required)
                         </label>
@@ -114,6 +122,8 @@
                 <button class="tab active" data-tab="employees">Employees</button>
                 <button class="tab" data-tab="sources">Sources</button>
                 <button class="tab" data-tab="reports">Reports</button>
+                <button class="tab" data-tab="object-sessions">Object Sessions</button>
+                <button class="tab" data-tab="object-counts">Object Counts</button>
                 <button class="tab" data-tab="events">Events</button>
             </div>
 
@@ -187,6 +197,69 @@
                 </div>
             </div>
 
+            <!-- Object Sessions Tab -->
+            <div id="tab-object-sessions" class="tab-content">
+                <div class="tab-header">
+                    <h3>Object Sessions (Presence Mode)</h3>
+                    <div class="date-picker">
+                        <input type="date" id="sessions-date" value="">
+                        <select id="sessions-class-filter">
+                            <option value="">All classes</option>
+                            <option value="0">Person</option>
+                            <option value="2">Car</option>
+                            <option value="3">Motorcycle</option>
+                            <option value="5">Bus</option>
+                            <option value="7">Truck</option>
+                        </select>
+                        <button id="btn-load-sessions" class="btn">Load Sessions</button>
+                    </div>
+                </div>
+                <div id="sessions-summary" class="report-summary"></div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Track ID</th>
+                            <th>Class</th>
+                            <th>Name/Label</th>
+                            <th>Start Time</th>
+                            <th>Duration</th>
+                            <th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sessions-table-body">
+                        <tr><td colspan="6" class="empty-message">Select a date and load sessions</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Object Counts Tab -->
+            <div id="tab-object-counts" class="tab-content">
+                <div class="tab-header">
+                    <h3>Object Counts (Counter Mode)</h3>
+                    <div class="date-picker">
+                        <input type="date" id="counts-date" value="">
+                        <button id="btn-load-counts" class="btn">Load Counts</button>
+                    </div>
+                </div>
+                <div id="counts-summary" class="report-summary"></div>
+                <h4>Daily Totals</h4>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Class</th>
+                            <th>Entries</th>
+                            <th>Exits</th>
+                            <th>Total</th>
+                        </tr>
+                    </thead>
+                    <tbody id="counts-table-body">
+                        <tr><td colspan="4" class="empty-message">Select a date and load counts</td></tr>
+                    </tbody>
+                </table>
+                <h4 style="margin-top: 1rem;">Hourly Breakdown</h4>
+                <div id="hourly-chart" class="hourly-chart"></div>
+            </div>
+
             <!-- Events Tab -->
             <div id="tab-events" class="tab-content">
                 <div class="tab-header">
@@ -213,6 +286,6 @@
         </div>
     </div>
 
-    <script src="/static/js/app.js?v=4"></script>
+    <script src="/static/js/app.js?v=5"></script>
 </body>
 </html>

@@ -13,7 +13,11 @@ from .schemas import (
     EmployeeCreate, EmployeeUpdate, EmployeeResponse, EmployeeListResponse,
     VideoSourceCreate, VideoSourceResponse, VideoSourceListResponse,
     DailyReportResponse, EmployeeTimeHistory, TimeLogResponse,
-    FaceUploadResponse, ManualIdentifyRequest
+    FaceUploadResponse, ManualIdentifyRequest,
+    ObjectSessionResponse, ObjectSessionListResponse,
+    ObjectDurationReportResponse, ObjectDurationReport,
+    ObjectCountReportResponse, ObjectCountResponse, HourlyCountResponse,
+    ObjectLabelCreate, ObjectLabelResponse
 )
 
 router = APIRouter()
@@ -331,3 +335,177 @@ async def get_employee_time_history(
         days_present=days_present,
         daily_entries=entries
     )
+
+
+# ============== Object Tracking Endpoints ==============
+
+@router.get("/reports/objects/sessions", response_model=ObjectSessionListResponse)
+async def get_object_sessions(
+    session_date: Optional[date] = Query(None),
+    class_id: Optional[int] = Query(None),
+    source_name: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get object sessions for a specific date"""
+    if session_date is None:
+        session_date = date.today()
+
+    sessions = await crud.get_object_sessions_by_date(
+        db, session_date, class_id=class_id, source_name=source_name
+    )
+
+    return ObjectSessionListResponse(
+        sessions=[
+            ObjectSessionResponse(
+                id=s.id,
+                track_id=s.track_id,
+                class_id=s.class_id,
+                class_name=s.class_name,
+                source_name=s.source_name,
+                start_time=s.start_time,
+                end_time=s.end_time,
+                duration_seconds=s.duration_seconds,
+                employee_id=s.employee_id,
+                label=s.label,
+                is_active=s.end_time is None
+            )
+            for s in sessions
+        ],
+        total=len(sessions)
+    )
+
+
+@router.get("/reports/objects/daily", response_model=ObjectDurationReportResponse)
+async def get_object_duration_report(
+    report_date: Optional[date] = Query(None),
+    source_name: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get daily object duration report grouped by class"""
+    if report_date is None:
+        report_date = date.today()
+
+    report_data = await crud.get_object_duration_report(db, report_date, source_name)
+
+    by_class = [
+        ObjectDurationReport(
+            class_id=r["class_id"],
+            class_name=r["class_name"],
+            session_count=r["session_count"],
+            total_seconds=r["total_seconds"],
+            avg_seconds=r["avg_seconds"],
+            formatted_duration=r["formatted_duration"]
+        )
+        for r in report_data
+    ]
+
+    total_sessions = sum(r.session_count for r in by_class)
+    total_seconds = sum(r.total_seconds for r in by_class)
+
+    return ObjectDurationReportResponse(
+        date=report_date,
+        source_name=source_name,
+        by_class=by_class,
+        total_sessions=total_sessions,
+        total_seconds=total_seconds
+    )
+
+
+@router.get("/reports/objects/counts", response_model=ObjectCountReportResponse)
+async def get_object_counts_report(
+    count_date: Optional[date] = Query(None),
+    source_name: Optional[str] = Query(None),
+    include_hourly: bool = Query(True),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get object entry/exit counts for counter mode"""
+    if count_date is None:
+        count_date = date.today()
+
+    # Get daily totals
+    daily_data = await crud.get_daily_counts(db, count_date, source_name)
+    daily_totals = [
+        ObjectCountResponse(
+            class_id=r["class_id"],
+            class_name=r["class_name"],
+            total_entries=r["total_entries"],
+            total_exits=r["total_exits"],
+            total=r["total_entries"] + r["total_exits"]
+        )
+        for r in daily_data
+    ]
+
+    # Get hourly breakdown if requested
+    hourly_breakdown = None
+    if include_hourly:
+        hourly_data = await crud.get_hourly_counts(db, count_date, source_name)
+        hourly_breakdown = [
+            HourlyCountResponse(
+                hour=r["hour"],
+                class_id=r["class_id"],
+                class_name=r["class_name"],
+                entry_count=r["entry_count"],
+                exit_count=r["exit_count"]
+            )
+            for r in hourly_data
+        ]
+
+    total_entries = sum(r.total_entries for r in daily_totals)
+    total_exits = sum(r.total_exits for r in daily_totals)
+
+    return ObjectCountReportResponse(
+        date=count_date,
+        source_name=source_name,
+        daily_totals=daily_totals,
+        hourly_breakdown=hourly_breakdown,
+        total_entries=total_entries,
+        total_exits=total_exits
+    )
+
+
+# ============== Object Label Endpoints ==============
+
+@router.post("/objects/labels", response_model=ObjectLabelResponse)
+async def create_object_label(
+    label: ObjectLabelCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Create a custom label for tracked objects"""
+    db_label = await crud.create_object_label(
+        db,
+        name=label.name,
+        class_id=label.class_id,
+        class_name=label.class_name
+    )
+    return ObjectLabelResponse(
+        id=db_label.id,
+        name=db_label.name,
+        class_id=db_label.class_id,
+        class_name=db_label.class_name,
+        created_at=db_label.created_at
+    )
+
+
+@router.get("/objects/labels", response_model=list[ObjectLabelResponse])
+async def list_object_labels(db: AsyncSession = Depends(get_db)):
+    """List all object labels"""
+    labels = await crud.get_all_object_labels(db)
+    return [
+        ObjectLabelResponse(
+            id=l.id,
+            name=l.name,
+            class_id=l.class_id,
+            class_name=l.class_name,
+            created_at=l.created_at
+        )
+        for l in labels
+    ]
+
+
+@router.delete("/objects/labels/{label_id}")
+async def delete_object_label(label_id: int, db: AsyncSession = Depends(get_db)):
+    """Delete an object label"""
+    success = await crud.delete_object_label(db, label_id)
+    if not success:
+        raise HTTPException(404, "Label not found")
+    return {"message": "Label deleted"}

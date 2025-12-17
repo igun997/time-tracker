@@ -64,9 +64,19 @@ class Settings(BaseSettings):
     face_recognition_tolerance: float = 0.6  # Lower = stricter matching
     face_recognition_model: str = "hog"  # "hog" (CPU) or "cnn" (GPU)
 
-    # Tracking
-    track_timeout_seconds: int = 30  # Mark person as "exited" after this
-    min_session_seconds: int = 5  # Ignore sessions shorter than this
+    # Tracking Mode
+    # "presence" = track duration (how long objects stay)
+    # "counter" = count entries/exits
+    # "both" = track both duration and counts
+    tracking_mode: str = "presence"
+    track_all_objects: bool = True  # Track all detected classes, not just identified persons
+
+    # Tracking Parameters
+    track_timeout_seconds: int = 30  # Mark object as "exited" after this
+    min_session_seconds: int = 3  # Ignore sessions shorter than this
+
+    # Counter Mode Settings
+    counter_hourly: bool = True  # Track hourly counts (False = daily only)
 
     # Video Processing
     frame_skip: int = 2  # Process every Nth frame

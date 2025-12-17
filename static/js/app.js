@@ -20,6 +20,7 @@ class TimeTrackerApp {
             videoPlaceholder: document.getElementById('video-placeholder'),
             sourceSelect: document.getElementById('source-select'),
             detectionClasses: document.getElementById('detection-classes'),
+            trackingMode: document.getElementById('tracking-mode'),
             demoMode: document.getElementById('demo-mode'),
             startBtn: document.getElementById('start-detection'),
             stopBtn: document.getElementById('stop-detection'),
@@ -33,6 +34,14 @@ class TimeTrackerApp {
             reportDate: document.getElementById('report-date'),
             reportTableBody: document.getElementById('report-table-body'),
             reportSummary: document.getElementById('report-summary'),
+            sessionsDate: document.getElementById('sessions-date'),
+            sessionsClassFilter: document.getElementById('sessions-class-filter'),
+            sessionsTableBody: document.getElementById('sessions-table-body'),
+            sessionsSummary: document.getElementById('sessions-summary'),
+            countsDate: document.getElementById('counts-date'),
+            countsTableBody: document.getElementById('counts-table-body'),
+            countsSummary: document.getElementById('counts-summary'),
+            hourlyChart: document.getElementById('hourly-chart'),
             eventsLog: document.getElementById('events-log'),
             modal: document.getElementById('modal'),
             modalTitle: document.getElementById('modal-title'),
@@ -44,7 +53,10 @@ class TimeTrackerApp {
 
     init() {
         // Set default date to today
-        this.elements.reportDate.value = new Date().toISOString().split('T')[0];
+        const today = new Date().toISOString().split('T')[0];
+        this.elements.reportDate.value = today;
+        this.elements.sessionsDate.value = today;
+        this.elements.countsDate.value = today;
 
         // Bind event handlers
         this.bindEvents();
@@ -93,6 +105,12 @@ class TimeTrackerApp {
 
         // Report
         document.getElementById('btn-load-report').addEventListener('click', () => this.loadReport());
+
+        // Object Sessions
+        document.getElementById('btn-load-sessions').addEventListener('click', () => this.loadObjectSessions());
+
+        // Object Counts
+        document.getElementById('btn-load-counts').addEventListener('click', () => this.loadObjectCounts());
 
         // Events
         document.getElementById('btn-clear-events').addEventListener('click', () => this.clearEvents());
@@ -214,6 +232,7 @@ class TimeTrackerApp {
 
         const demoMode = this.elements.demoMode.checked;
         const detectionClasses = this.elements.detectionClasses.value;
+        const trackingMode = this.elements.trackingMode.value;
 
         try {
             const response = await fetch('/api/detection/start', {
@@ -224,7 +243,8 @@ class TimeTrackerApp {
                     demo_mode: demoMode,
                     frame_skip: 2,
                     confidence_threshold: 0.5,
-                    detection_classes: detectionClasses
+                    detection_classes: detectionClasses,
+                    tracking_mode: trackingMode
                 })
             });
 
@@ -287,6 +307,7 @@ class TimeTrackerApp {
 
         const demoMode = this.elements.demoMode.checked;
         const detectionClasses = this.elements.detectionClasses.value;
+        const trackingMode = this.elements.trackingMode.value;
 
         // Check if we're on HTTPS (required for remote webcam access)
         if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
@@ -328,7 +349,7 @@ class TimeTrackerApp {
 
             // Connect to client-cam WebSocket
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host}/ws/client-cam?demo=${demoMode}&classes=${encodeURIComponent(detectionClasses)}`;
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/client-cam?demo=${demoMode}&classes=${encodeURIComponent(detectionClasses)}&mode=${trackingMode}`;
             console.log('Connecting to WebSocket:', wsUrl);
 
             this.wsClientCam = new WebSocket(wsUrl);
@@ -502,6 +523,36 @@ class TimeTrackerApp {
         }
     }
 
+    async loadObjectSessions() {
+        const date = this.elements.sessionsDate.value;
+        const classId = this.elements.sessionsClassFilter.value;
+        if (!date) return;
+
+        try {
+            let url = `/api/reports/objects/sessions?session_date=${date}`;
+            if (classId) url += `&class_id=${classId}`;
+
+            const response = await fetch(url);
+            const data = await response.json();
+            this.updateSessionsTable(data);
+        } catch (error) {
+            console.error('Error loading object sessions:', error);
+        }
+    }
+
+    async loadObjectCounts() {
+        const date = this.elements.countsDate.value;
+        if (!date) return;
+
+        try {
+            const response = await fetch(`/api/reports/objects/counts?count_date=${date}`);
+            const data = await response.json();
+            this.updateCountsTable(data);
+        } catch (error) {
+            console.error('Error loading object counts:', error);
+        }
+    }
+
     async checkStatus() {
         try {
             const response = await fetch('/api/status');
@@ -633,6 +684,73 @@ class TimeTrackerApp {
             <p><strong>Total Employees:</strong> ${report.employee_count}</p>
             <p><strong>Total Time:</strong> ${report.total_formatted}</p>
         `;
+    }
+
+    updateSessionsTable(data) {
+        if (data.sessions.length === 0) {
+            this.elements.sessionsTableBody.innerHTML = '<tr><td colspan="6" class="empty-message">No sessions for this date</td></tr>';
+            this.elements.sessionsSummary.innerHTML = '';
+            return;
+        }
+
+        this.elements.sessionsTableBody.innerHTML = data.sessions.map(session => {
+            const name = session.label || (session.employee_id ? `Employee #${session.employee_id}` : '-');
+            const startTime = new Date(session.start_time).toLocaleTimeString();
+            const duration = this.formatDuration(session.duration_seconds || 0);
+            return `
+            <tr>
+                <td>${session.track_id}</td>
+                <td>${session.class_name}</td>
+                <td>${name}</td>
+                <td>${startTime}</td>
+                <td>${duration}</td>
+                <td>${session.source_name}</td>
+            </tr>
+        `}).join('');
+
+        this.elements.sessionsSummary.innerHTML = `
+            <p><strong>Total Sessions:</strong> ${data.total}</p>
+        `;
+    }
+
+    updateCountsTable(data) {
+        if (data.daily_totals.length === 0) {
+            this.elements.countsTableBody.innerHTML = '<tr><td colspan="4" class="empty-message">No counts for this date</td></tr>';
+            this.elements.countsSummary.innerHTML = '';
+            this.elements.hourlyChart.innerHTML = '';
+            return;
+        }
+
+        this.elements.countsTableBody.innerHTML = data.daily_totals.map(row => `
+            <tr>
+                <td>${row.class_name}</td>
+                <td>${row.total_entries}</td>
+                <td>${row.total_exits}</td>
+                <td>${row.total}</td>
+            </tr>
+        `).join('');
+
+        this.elements.countsSummary.innerHTML = `
+            <p><strong>Total Entries:</strong> ${data.total_entries}</p>
+            <p><strong>Total Exits:</strong> ${data.total_exits}</p>
+        `;
+
+        // Display hourly breakdown as a simple text chart
+        if (data.hourly_breakdown && data.hourly_breakdown.length > 0) {
+            const hourlyHtml = data.hourly_breakdown.map(h => {
+                const barWidth = Math.min((h.entry_count + h.exit_count) * 10, 200);
+                return `
+                <div class="hourly-row">
+                    <span class="hour-label">${h.hour.toString().padStart(2, '0')}:00</span>
+                    <span class="class-label">${h.class_name}</span>
+                    <div class="hour-bar" style="width: ${barWidth}px;"></div>
+                    <span class="hour-count">${h.entry_count} in / ${h.exit_count} out</span>
+                </div>
+            `}).join('');
+            this.elements.hourlyChart.innerHTML = hourlyHtml;
+        } else {
+            this.elements.hourlyChart.innerHTML = '<p class="empty-message">No hourly data</p>';
+        }
     }
 
     addEventLog(event) {

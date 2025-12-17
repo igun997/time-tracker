@@ -111,6 +111,82 @@ class VideoSource(Base):
         return f"<VideoSource(name='{self.name}', type='{self.source_type}')>"
 
 
+# ============== New Object Tracking Models ==============
+
+class ObjectSession(Base):
+    """Track any detected object's presence duration"""
+    __tablename__ = "object_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    track_id = Column(Integer, nullable=False)  # From tracker
+    class_id = Column(Integer, nullable=False)  # YOLO class ID
+    class_name = Column(String(50), nullable=False)  # "person", "car", etc.
+    source_name = Column(String(100), nullable=False)
+    start_time = Column(DateTime, nullable=False, default=datetime.utcnow)
+    end_time = Column(DateTime, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
+    session_date = Column(Date, nullable=False, default=date.today)
+    # Optional identification
+    employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True)
+    label = Column(String(100), nullable=True)  # Custom label like "John's Car"
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Relationships
+    employee = relationship("Employee")
+
+    @property
+    def is_active(self) -> bool:
+        return self.end_time is None
+
+    @property
+    def computed_duration(self) -> int:
+        if self.duration_seconds is not None:
+            return self.duration_seconds
+        if self.end_time:
+            return int((self.end_time - self.start_time).total_seconds())
+        return int((datetime.utcnow() - self.start_time).total_seconds())
+
+    def __repr__(self):
+        return f"<ObjectSession(id={self.id}, class={self.class_name}, track_id={self.track_id})>"
+
+
+class ObjectCount(Base):
+    """Count objects entering/exiting for counter mode"""
+    __tablename__ = "object_counts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_name = Column(String(100), nullable=False)
+    class_id = Column(Integer, nullable=False)
+    class_name = Column(String(50), nullable=False)
+    count_date = Column(Date, nullable=False, default=date.today)
+    hour = Column(Integer, nullable=True)  # 0-23 for hourly breakdown, null for daily
+    entry_count = Column(Integer, default=0)
+    exit_count = Column(Integer, default=0)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @property
+    def total_count(self) -> int:
+        return self.entry_count + self.exit_count
+
+    def __repr__(self):
+        return f"<ObjectCount(class={self.class_name}, date={self.count_date}, entries={self.entry_count})>"
+
+
+class ObjectLabel(Base):
+    """Custom labels for tracked objects (for re-identification)"""
+    __tablename__ = "object_labels"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    class_id = Column(Integer, nullable=False)
+    class_name = Column(String(50), nullable=False)
+    visual_features = Column(LargeBinary, nullable=True)  # For future re-identification
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<ObjectLabel(id={self.id}, name='{self.name}', class={self.class_name})>"
+
+
 # Database initialization
 async def init_db(database_url: str):
     engine = create_async_engine(database_url, echo=False)

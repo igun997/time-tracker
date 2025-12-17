@@ -69,6 +69,10 @@ class DetectionConfig(BaseModel):
         description="Classes to detect. Can be: class names (person,car,motorcycle), "
                     "class IDs (0,2,3), or predefined groups (vehicles, traffic, persons)"
     )
+    tracking_mode: str = Field(
+        "presence",
+        description="Tracking mode: 'presence' (track duration), 'counter' (count entries/exits), or 'both'"
+    )
 
 
 class DetectionStatus(BaseModel):
@@ -185,3 +189,95 @@ class APIStatus(BaseModel):
     total_employees: int
     yolo_loaded: bool
     face_recognition_available: bool
+
+
+# ============== Object Tracking Schemas ==============
+
+class ObjectSessionResponse(BaseModel):
+    """Response for a single object session"""
+    id: int
+    track_id: int
+    class_id: int
+    class_name: str
+    source_name: str
+    start_time: datetime
+    end_time: Optional[datetime]
+    duration_seconds: Optional[int]
+    employee_id: Optional[int]
+    label: Optional[str]
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+class ObjectSessionListResponse(BaseModel):
+    """Response for list of object sessions"""
+    sessions: List[ObjectSessionResponse]
+    total: int
+
+
+class ObjectDurationReport(BaseModel):
+    """Duration report for a single class"""
+    class_id: int
+    class_name: str
+    session_count: int
+    total_seconds: int
+    avg_seconds: int
+    formatted_duration: str
+
+
+class ObjectDurationReportResponse(BaseModel):
+    """Response for object duration report"""
+    date: date
+    source_name: Optional[str]
+    by_class: List[ObjectDurationReport]
+    total_sessions: int
+    total_seconds: int
+
+
+class ObjectCountResponse(BaseModel):
+    """Response for object counts"""
+    class_id: int
+    class_name: str
+    total_entries: int
+    total_exits: int
+    total: int
+
+
+class HourlyCountResponse(BaseModel):
+    """Hourly count breakdown"""
+    hour: int
+    class_id: int
+    class_name: str
+    entry_count: int
+    exit_count: int
+
+
+class ObjectCountReportResponse(BaseModel):
+    """Response for counter mode report"""
+    date: date
+    source_name: Optional[str]
+    daily_totals: List[ObjectCountResponse]
+    hourly_breakdown: Optional[List[HourlyCountResponse]]
+    total_entries: int
+    total_exits: int
+
+
+class ObjectLabelCreate(BaseModel):
+    """Create object label request"""
+    name: str = Field(..., min_length=1, max_length=100)
+    class_id: int = Field(..., ge=0, le=79)
+    class_name: str = Field(..., min_length=1, max_length=50)
+
+
+class ObjectLabelResponse(BaseModel):
+    """Object label response"""
+    id: int
+    name: str
+    class_id: int
+    class_name: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True

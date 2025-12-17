@@ -15,7 +15,7 @@ from src.video.capture import VideoCapture, VideoSourceFactory, FrameData
 from src.detection.yolo_detector import create_detector, Detection
 from src.detection.face_recognizer import create_face_recognizer
 from src.detection.tracker import PersonTracker, TrackedPerson
-from src.tracking.session_manager import SessionManager, SessionEvent
+from src.tracking.session_manager import ObjectSessionManager, SessionManager, SessionEvent
 
 
 @dataclass
@@ -30,6 +30,7 @@ class DetectionState:
     demo_mode: bool = False
     client_mode: bool = False  # True when receiving frames from client webcam
     detection_classes: List[int] = field(default_factory=lambda: [0])  # Classes being detected
+    tracking_mode: str = "presence"  # "presence", "counter", or "both"
 
 
 class ConnectionManager:
@@ -99,7 +100,10 @@ class DetectionPipeline:
         frame_skip: int = 2,
         confidence_threshold: float = 0.5,
         detection_classes: Optional[str] = None,
-        db_session_callback=None
+        tracking_mode: str = "presence",
+        db_session_callback=None,
+        db_entry_callback=None,
+        db_exit_callback=None
     ) -> bool:
         """Start the detection pipeline"""
         if self.state.is_running:
@@ -152,12 +156,15 @@ class DetectionPipeline:
                 max_distance=100.0
             )
 
-            # Create session manager
-            self._session_manager = SessionManager(
+            # Create session manager with tracking mode
+            self._session_manager = ObjectSessionManager(
                 source_name=source_name,
+                mode=tracking_mode,
                 timeout_seconds=settings.track_timeout_seconds,
                 min_session_seconds=settings.min_session_seconds,
-                on_session_end=db_session_callback
+                on_session_end=db_session_callback,
+                on_object_entry=db_entry_callback,
+                on_object_exit=db_exit_callback
             )
 
             # Update state
@@ -166,7 +173,8 @@ class DetectionPipeline:
                 source_name=source_name,
                 start_time=time.time(),
                 demo_mode=demo_mode,
-                detection_classes=class_ids
+                detection_classes=class_ids,
+                tracking_mode=tracking_mode
             )
 
             # Start processing task
@@ -186,7 +194,10 @@ class DetectionPipeline:
         demo_mode: bool = False,
         confidence_threshold: float = 0.5,
         detection_classes: Optional[str] = None,
-        db_session_callback=None
+        tracking_mode: str = "presence",
+        db_session_callback=None,
+        db_entry_callback=None,
+        db_exit_callback=None
     ) -> bool:
         """Start detection pipeline in client mode (receiving frames via WebSocket)"""
         if self.state.is_running:
@@ -222,12 +233,15 @@ class DetectionPipeline:
                 max_distance=100.0
             )
 
-            # Create session manager
-            self._session_manager = SessionManager(
+            # Create session manager with tracking mode
+            self._session_manager = ObjectSessionManager(
                 source_name=source_name,
+                mode=tracking_mode,
                 timeout_seconds=settings.track_timeout_seconds,
                 min_session_seconds=settings.min_session_seconds,
-                on_session_end=db_session_callback
+                on_session_end=db_session_callback,
+                on_object_entry=db_entry_callback,
+                on_object_exit=db_exit_callback
             )
 
             # Update state
@@ -237,7 +251,8 @@ class DetectionPipeline:
                 start_time=time.time(),
                 demo_mode=demo_mode,
                 client_mode=True,
-                detection_classes=class_ids
+                detection_classes=class_ids,
+                tracking_mode=tracking_mode
             )
 
             return True
@@ -599,7 +614,8 @@ async def websocket_events_handler(websocket: WebSocket):
 async def websocket_client_cam_handler(
     websocket: WebSocket,
     demo_mode: bool = False,
-    detection_classes: Optional[str] = None
+    detection_classes: Optional[str] = None,
+    tracking_mode: str = "presence"
 ):
     """Handle WebSocket connection for client webcam streaming
 
@@ -616,7 +632,8 @@ async def websocket_client_cam_handler(
         source_name="Client Webcam",
         demo_mode=demo_mode,
         confidence_threshold=settings.yolo_confidence,
-        detection_classes=detection_classes
+        detection_classes=detection_classes,
+        tracking_mode=tracking_mode
     )
 
     if not success:
@@ -633,7 +650,8 @@ async def websocket_client_cam_handler(
     await websocket.send_json({
         "type": "started",
         "message": "Detection started in client mode",
-        "detection_classes": class_names
+        "detection_classes": class_names,
+        "tracking_mode": tracking_mode
     })
 
     try:

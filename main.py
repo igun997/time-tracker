@@ -103,10 +103,21 @@ async def start_detection(config: DetectionConfig):
         # Load known faces
         faces_data = await crud.get_all_face_encodings(db)
 
-    # Callback for saving sessions to database
-    async def save_session(session):
-        if session.employee_id:
-            async with async_session_maker() as db:
+    # Callback for saving sessions to database (presence mode)
+    async def save_object_session(session):
+        async with async_session_maker() as db:
+            # Save to object_sessions table (tracks all objects)
+            await crud.create_object_session(
+                db,
+                track_id=session.track_id,
+                class_id=session.class_id,
+                class_name=session.class_name,
+                source_name=session.source_name,
+                employee_id=session.employee_id,
+                label=session.label
+            )
+            # Also update employee time_logs if identified person
+            if session.employee_id and session.is_person:
                 await crud.update_time_log(
                     db,
                     session.employee_id,
@@ -115,7 +126,31 @@ async def start_detection(config: DetectionConfig):
                     session.duration_seconds
                 )
 
-    # Start detection
+    # Callback for counting entries (counter mode)
+    async def count_entry(session):
+        async with async_session_maker() as db:
+            await crud.increment_object_count(
+                db,
+                source_name=session.source_name,
+                class_id=session.class_id,
+                class_name=session.class_name,
+                direction="entry",
+                hourly=settings.counter_hourly
+            )
+
+    # Callback for counting exits (counter mode)
+    async def count_exit(session):
+        async with async_session_maker() as db:
+            await crud.increment_object_count(
+                db,
+                source_name=session.source_name,
+                class_id=session.class_id,
+                class_name=session.class_name,
+                direction="exit",
+                hourly=settings.counter_hourly
+            )
+
+    # Start detection with tracking mode
     success = await detection_pipeline.start(
         source_type=source.source_type,
         source_name=source.name,
@@ -125,7 +160,10 @@ async def start_detection(config: DetectionConfig):
         frame_skip=config.frame_skip,
         confidence_threshold=config.confidence_threshold,
         detection_classes=config.detection_classes,
-        db_session_callback=lambda s: asyncio.create_task(save_session(s))
+        tracking_mode=config.tracking_mode,
+        db_session_callback=lambda s: asyncio.create_task(save_object_session(s)),
+        db_entry_callback=lambda s: asyncio.create_task(count_entry(s)),
+        db_exit_callback=lambda s: asyncio.create_task(count_exit(s))
     )
 
     if not success:
@@ -142,7 +180,8 @@ async def start_detection(config: DetectionConfig):
     return {
         "message": "Detection started",
         "source": source.name,
-        "detection_classes": detected_classes
+        "detection_classes": detected_classes,
+        "tracking_mode": config.tracking_mode
     }
 
 
@@ -199,7 +238,8 @@ async def websocket_events(websocket: WebSocket):
 async def websocket_client_cam(
     websocket: WebSocket,
     demo: bool = False,
-    classes: str = None
+    classes: str = None,
+    mode: str = "presence"
 ):
     """WebSocket endpoint for client webcam streaming
 
@@ -209,13 +249,19 @@ async def websocket_client_cam(
     Query params:
         demo: Set to true for demo mode (no YOLO model required)
         classes: Detection classes (e.g., "person", "traffic", "person,car,motorcycle")
+        mode: Tracking mode - "presence", "counter", or "both"
 
     Protocol:
         Send: {"type": "frame", "frame": "<base64 jpeg data>"}
         Receive: {"type": "frame", "frame": "<annotated base64>", "detections": [...], "stats": {...}}
         Send: {"type": "stop"} to end the session
     """
-    await websocket_client_cam_handler(websocket, demo_mode=demo, detection_classes=classes)
+    await websocket_client_cam_handler(
+        websocket,
+        demo_mode=demo,
+        detection_classes=classes,
+        tracking_mode=mode
+    )
 
 
 # ============== API Status ==============
