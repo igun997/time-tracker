@@ -4,10 +4,12 @@ Real-time person detection and time tracking system using YOLOv8 for detection a
 
 ## Features
 
-- **Real-time Person Detection** - YOLOv8-based person detection with configurable confidence threshold
+- **Real-time Object Detection** - YOLOv8-based detection with configurable classes (person, vehicles, traffic)
+- **Configurable Detection Classes** - Detect persons only, vehicles, or both with easy dropdown selection
 - **Face Recognition** - Automatic employee identification using face recognition
 - **Time Tracking** - Track presence duration per employee with session management
-- **Multiple Video Sources** - Support for webcam, RTSP streams, and video files
+- **Multiple Video Sources** - Support for webcam, RTSP streams, HLS (.m3u8), and video files
+- **Client Webcam Mode** - Stream your local webcam to a remote server for processing (useful when server has no camera)
 - **Live Streaming** - WebSocket-based real-time video preview with annotations
 - **REST API** - Full API for all operations
 - **Web Dashboard** - Modern web UI for monitoring and management
@@ -107,10 +109,17 @@ http://localhost:8000
 
 3. **Start Detection**
    - Select your video source from the dropdown
+   - Choose detection classes (Person, Vehicles, Traffic, etc.)
    - Click "Start Detection"
-   - Watch the live feed with person detection
+   - Watch the live feed with detection annotations
 
-4. **View Reports**
+4. **Use Client Webcam** (if server has no camera)
+   - Click "Use My Webcam (Client Mode)"
+   - Allow browser camera access
+   - Your webcam streams to the server for processing
+   - Requires HTTPS for remote access (works on localhost without HTTPS)
+
+5. **View Reports**
    - Go to "Reports" tab
    - Select a date to view time tracking data
 
@@ -126,6 +135,7 @@ DEBUG=true
 YOLO_MODEL_PATH=models/yolov8n.pt
 YOLO_CONFIDENCE=0.5
 YOLO_DEVICE=auto  # auto, cpu, cuda, cuda:0
+YOLO_CLASSES=person  # person, vehicles, traffic, or comma-separated class names
 
 # Face Recognition
 FACE_RECOGNITION_TOLERANCE=0.6  # Lower = stricter matching
@@ -140,6 +150,36 @@ FRAME_SKIP=2                   # Process every Nth frame
 MAX_FPS=30
 JPEG_QUALITY=80
 ```
+
+## Detection Classes
+
+YOLOv8 supports 80 COCO classes. You can configure which classes to detect:
+
+| Preset | Classes Detected |
+|--------|------------------|
+| `person` | Person only (default) |
+| `vehicles` | Car, motorcycle, bus, truck |
+| `all_vehicles` | Bicycle, car, motorcycle, bus, train, truck, boat |
+| `traffic` | Person, vehicles, traffic light, stop sign |
+
+You can also specify individual classes by name or ID:
+
+```bash
+# Via API
+curl -X POST http://localhost:8000/api/detection/start \
+  -H "Content-Type: application/json" \
+  -d '{"source_id": 1, "detection_classes": "person,car,motorcycle,bus,truck"}'
+
+# Or use preset
+  -d '{"source_id": 1, "detection_classes": "traffic"}'
+```
+
+**Available classes (COCO):**
+| ID | Class | ID | Class | ID | Class |
+|----|-------|----|-------|----|-------|
+| 0 | person | 1 | bicycle | 2 | car |
+| 3 | motorcycle | 5 | bus | 7 | truck |
+| 9 | traffic light | 11 | stop sign | ... | ... |
 
 ## API Reference
 
@@ -184,6 +224,30 @@ JPEG_QUALITY=80
 |----------|-------------|
 | `ws://host/ws/stream` | Video stream with detections |
 | `ws://host/ws/events` | Session events (start/end) |
+| `ws://host/ws/client-cam` | Client webcam streaming (send frames, receive processed) |
+
+#### Client Webcam Protocol
+
+Connect to `/ws/client-cam?demo=false&classes=person,car` and exchange JSON messages:
+
+```javascript
+// Send frame to server
+ws.send(JSON.stringify({
+  type: "frame",
+  frame: "<base64 jpeg data>"
+}));
+
+// Receive processed frame
+{
+  "type": "frame",
+  "frame": "<annotated base64 jpeg>",
+  "detections": [...],
+  "stats": { "fps": 10, "total_objects": 2, ... }
+}
+
+// Stop detection
+ws.send(JSON.stringify({ type: "stop" }));
+```
 
 ## API Examples
 
@@ -221,9 +285,15 @@ curl -X POST http://localhost:8000/api/sources \
 ### Start Detection
 
 ```bash
+# Detect persons only
 curl -X POST http://localhost:8000/api/detection/start \
   -H "Content-Type: application/json" \
   -d '{"source_id": 1, "demo_mode": false}'
+
+# Detect persons and vehicles
+curl -X POST http://localhost:8000/api/detection/start \
+  -H "Content-Type: application/json" \
+  -d '{"source_id": 1, "detection_classes": "person,car,motorcycle,bus,truck"}'
 ```
 
 ### Get Daily Report
@@ -333,6 +403,14 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 - Verify model file exists in `models/yolov8n.pt`
 - Check file permissions
 - Try downloading the model again
+- **PyTorch 2.6+ users**: The app includes a fix for the `weights_only=True` default change
+
+### Client webcam not working
+
+- **HTTPS required**: Remote webcam access requires HTTPS (works without on localhost)
+- Check browser permissions for camera access
+- Ensure no other application is using the webcam
+- Try a different browser if issues persist
 
 ### WebSocket connection failing
 
