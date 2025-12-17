@@ -1,435 +1,185 @@
-# YOLO Time Tracker
+# YOLO Object Tracker
 
-Real-time person detection and time tracking system using YOLOv8 for detection and face recognition for employee identification. Track how long employees are present in a monitored area with automatic identification.
+Sistem pelacakan objek real-time menggunakan YOLOv8 dengan pengenalan wajah untuk identifikasi karyawan.
 
-## Features
+## Fitur Utama
 
-- **Real-time Object Detection** - YOLOv8-based detection with configurable classes (person, vehicles, traffic)
-- **Configurable Detection Classes** - Detect persons only, vehicles, or both with easy dropdown selection
-- **Face Recognition** - Automatic employee identification using face recognition
-- **Time Tracking** - Track presence duration per employee with session management
-- **Multiple Video Sources** - Support for webcam, RTSP streams, HLS (.m3u8), and video files
-- **Client Webcam Mode** - Stream your local webcam to a remote server for processing (useful when server has no camera)
-- **Live Streaming** - WebSocket-based real-time video preview with annotations
-- **REST API** - Full API for all operations
-- **Web Dashboard** - Modern web UI for monitoring and management
-- **Demo Mode** - Test the system without YOLO model (for development)
+- **Deteksi Objek Real-time** - YOLOv8 dengan kelas yang dapat dikonfigurasi (orang, kendaraan, lalu lintas)
+- **Mode Pelacakan Ganda**:
+  - `presence` - Lacak durasi objek dalam frame
+  - `counter` - Hitung objek masuk/keluar
+  - `both` - Keduanya sekaligus
+- **Pengenalan Wajah** - Identifikasi karyawan otomatis
+- **Sumber Video** - Webcam, RTSP, HLS (.m3u8), file video
+- **Mode Webcam Client** - Stream webcam lokal ke server remote
+- **Dashboard Web** - UI modern dengan live streaming
 
-## Requirements
-
-- Python 3.9+
-- OpenCV
-- CUDA-capable GPU (optional, for better performance)
-
-## Installation
-
-### 1. Clone the Repository
+## Instalasi
 
 ```bash
+# Clone repo
 git clone git@github.com:igun997/time-tracker.git
 cd time-tracker
-```
 
-### 2. Create Virtual Environment
-
-```bash
+# Virtual environment
 python3 -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-# or
-.venv\Scripts\activate  # Windows
-```
+source .venv/bin/activate
 
-### 3. Install Dependencies
-
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-### 4. Download YOLO Model
-
-Download the YOLOv8 model and place it in the `models/` directory:
-
-```bash
-# Option 1: Download directly
+# Download model YOLO
 wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt -P models/
 
-# Option 2: Using Python
-python -c "from ultralytics import YOLO; YOLO('yolov8n.pt')"
-mv yolov8n.pt models/
-```
-
-**Available models** (choose based on your hardware):
-| Model | Size | Speed | Accuracy |
-|-------|------|-------|----------|
-| yolov8n.pt | 6 MB | Fastest | Good |
-| yolov8s.pt | 22 MB | Fast | Better |
-| yolov8m.pt | 52 MB | Medium | Great |
-| yolov8l.pt | 87 MB | Slow | Best |
-
-### 5. Install Face Recognition Dependencies
-
-For face recognition to work, you need dlib:
-
-```bash
-# Ubuntu/Debian
+# Install face recognition (opsional)
 sudo apt-get install cmake libopenblas-dev liblapack-dev
-
-# Then install face_recognition
 pip install face-recognition
 ```
 
-## Usage
-
-### Start the Server
+## Penggunaan
 
 ```bash
 python main.py
+# Buka http://localhost:8000
 ```
 
-The server will start at `http://localhost:8000`
+### Panduan Cepat
 
-### Access the Web UI
+1. **Tambah Sumber Video** - Webcam, RTSP URL, atau file video
+2. **Daftar Karyawan** - Nama + upload foto wajah
+3. **Mulai Deteksi** - Pilih sumber, kelas deteksi, mode pelacakan
+4. **Lihat Laporan** - Tab Reports, Object Sessions, Object Counts
 
-Open your browser and navigate to:
-```
-http://localhost:8000
-```
-
-### Quick Start Guide
-
-1. **Add a Video Source**
-   - Click "Add Video Source" in the UI
-   - Choose type: Webcam (device 0), RTSP URL, or video file path
-   - Give it a name (e.g., "Office Camera")
-
-2. **Register Employees**
-   - Click "Register Employee"
-   - Enter employee name and optional ID
-   - Upload face photos for recognition
-
-3. **Start Detection**
-   - Select your video source from the dropdown
-   - Choose detection classes (Person, Vehicles, Traffic, etc.)
-   - Click "Start Detection"
-   - Watch the live feed with detection annotations
-
-4. **Use Client Webcam** (if server has no camera)
-   - Click "Use My Webcam (Client Mode)"
-   - Allow browser camera access
-   - Your webcam streams to the server for processing
-   - Requires HTTPS for remote access (works on localhost without HTTPS)
-
-5. **View Reports**
-   - Go to "Reports" tab
-   - Select a date to view time tracking data
-
-## Configuration
-
-Configuration can be done via environment variables or `.env` file:
+## Konfigurasi (.env)
 
 ```env
-# .env file
-DEBUG=true
-
-# YOLO Settings
+# YOLO
 YOLO_MODEL_PATH=models/yolov8n.pt
 YOLO_CONFIDENCE=0.5
-YOLO_DEVICE=auto  # auto, cpu, cuda, cuda:0
-YOLO_CLASSES=person  # person, vehicles, traffic, or comma-separated class names
+YOLO_DEVICE=auto
 
 # Face Recognition
-FACE_RECOGNITION_TOLERANCE=0.6  # Lower = stricter matching
-FACE_RECOGNITION_MODEL=hog     # hog (CPU) or cnn (GPU)
+FACE_RECOGNITION_TOLERANCE=0.6
+FACE_RECOGNITION_MODEL=hog
 
 # Tracking
-TRACK_TIMEOUT_SECONDS=30       # Seconds before marking person as "exited"
-MIN_SESSION_SECONDS=5          # Minimum session duration to record
+TRACKING_MODE=presence    # presence, counter, both
+TRACK_TIMEOUT_SECONDS=30
+MIN_SESSION_SECONDS=5
 
-# Video Processing
-FRAME_SKIP=2                   # Process every Nth frame
+# Video
+FRAME_SKIP=2
 MAX_FPS=30
-JPEG_QUALITY=80
 ```
 
-## Detection Classes
+## Kelas Deteksi
 
-YOLOv8 supports 80 COCO classes. You can configure which classes to detect:
+| Preset | Kelas |
+|--------|-------|
+| `person` | Orang saja |
+| `vehicles` | Mobil, motor, bus, truk |
+| `traffic` | Orang + kendaraan + rambu |
 
-| Preset | Classes Detected |
-|--------|------------------|
-| `person` | Person only (default) |
-| `vehicles` | Car, motorcycle, bus, truck |
-| `all_vehicles` | Bicycle, car, motorcycle, bus, train, truck, boat |
-| `traffic` | Person, vehicles, traffic light, stop sign |
+## API Endpoints
 
-You can also specify individual classes by name or ID:
+### Karyawan
+| Method | Endpoint | Deskripsi |
+|--------|----------|-----------|
+| GET/POST | `/api/employees` | List/Tambah karyawan |
+| GET/PUT/DELETE | `/api/employees/{id}` | Detail/Update/Hapus |
+| POST | `/api/employees/{id}/faces` | Upload foto wajah |
 
-```bash
-# Via API
-curl -X POST http://localhost:8000/api/detection/start \
-  -H "Content-Type: application/json" \
-  -d '{"source_id": 1, "detection_classes": "person,car,motorcycle,bus,truck"}'
+### Sumber Video
+| Method | Endpoint | Deskripsi |
+|--------|----------|-----------|
+| GET/POST | `/api/sources` | List/Tambah sumber |
+| DELETE | `/api/sources/{id}` | Hapus sumber |
 
-# Or use preset
-  -d '{"source_id": 1, "detection_classes": "traffic"}'
-```
+### Deteksi
+| Method | Endpoint | Deskripsi |
+|--------|----------|-----------|
+| POST | `/api/detection/start` | Mulai deteksi |
+| POST | `/api/detection/stop` | Stop deteksi |
+| GET | `/api/detection/status` | Status deteksi |
 
-**Available classes (COCO):**
-| ID | Class | ID | Class | ID | Class |
-|----|-------|----|-------|----|-------|
-| 0 | person | 1 | bicycle | 2 | car |
-| 3 | motorcycle | 5 | bus | 7 | truck |
-| 9 | traffic light | 11 | stop sign | ... | ... |
-
-## API Reference
-
-### Employees
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/employees` | List all employees |
-| POST | `/api/employees` | Create employee |
-| GET | `/api/employees/{id}` | Get employee details |
-| PUT | `/api/employees/{id}` | Update employee |
-| DELETE | `/api/employees/{id}` | Delete employee |
-| POST | `/api/employees/{id}/faces` | Upload face photo |
-
-### Video Sources
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/sources` | List all sources |
-| POST | `/api/sources` | Add video source |
-| DELETE | `/api/sources/{id}` | Delete source |
-
-### Detection
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/detection/start` | Start detection |
-| POST | `/api/detection/stop` | Stop detection |
-| GET | `/api/detection/status` | Get detection status |
-| POST | `/api/detection/identify` | Manually identify person |
-
-### Reports
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/reports/daily` | Get daily time report |
-| GET | `/api/reports/employee/{id}` | Get employee time history |
+### Laporan
+| Method | Endpoint | Deskripsi |
+|--------|----------|-----------|
+| GET | `/api/reports/daily` | Laporan harian karyawan |
+| GET | `/api/reports/employee/{id}` | Riwayat waktu karyawan |
+| GET | `/api/reports/objects/sessions` | Sesi objek (presence mode) |
+| GET | `/api/reports/objects/counts` | Hitungan objek (counter mode) |
+| GET | `/api/reports/objects/daily` | Laporan durasi per kelas |
 
 ### WebSocket
+| Endpoint | Deskripsi |
+|----------|-----------|
+| `/ws/stream` | Stream video dengan deteksi |
+| `/ws/events` | Event sesi (mulai/selesai) |
+| `/ws/client-cam` | Stream webcam client |
 
-| Endpoint | Description |
-|----------|-------------|
-| `ws://host/ws/stream` | Video stream with detections |
-| `ws://host/ws/events` | Session events (start/end) |
-| `ws://host/ws/client-cam` | Client webcam streaming (send frames, receive processed) |
-
-#### Client Webcam Protocol
-
-Connect to `/ws/client-cam?demo=false&classes=person,car` and exchange JSON messages:
-
-```javascript
-// Send frame to server
-ws.send(JSON.stringify({
-  type: "frame",
-  frame: "<base64 jpeg data>"
-}));
-
-// Receive processed frame
-{
-  "type": "frame",
-  "frame": "<annotated base64 jpeg>",
-  "detections": [...],
-  "stats": { "fps": 10, "total_objects": 2, ... }
-}
-
-// Stop detection
-ws.send(JSON.stringify({ type: "stop" }));
-```
-
-## API Examples
-
-### Create Employee
+## Contoh API
 
 ```bash
+# Tambah karyawan
 curl -X POST http://localhost:8000/api/employees \
   -H "Content-Type: application/json" \
   -d '{"name": "John Doe", "employee_id": "EMP001"}'
-```
 
-### Upload Face Photo
-
-```bash
-curl -X POST http://localhost:8000/api/employees/1/faces \
-  -F "file=@john_face.jpg"
-```
-
-### Add Webcam Source
-
-```bash
+# Tambah webcam
 curl -X POST http://localhost:8000/api/sources \
   -H "Content-Type: application/json" \
-  -d '{"name": "Office Webcam", "source_type": "webcam", "device_index": 0}'
-```
+  -d '{"name": "Webcam", "source_type": "webcam", "device_index": 0}'
 
-### Add RTSP Source
-
-```bash
-curl -X POST http://localhost:8000/api/sources \
-  -H "Content-Type: application/json" \
-  -d '{"name": "IP Camera", "source_type": "rtsp", "source_url": "rtsp://192.168.1.100:554/stream"}'
-```
-
-### Start Detection
-
-```bash
-# Detect persons only
+# Mulai deteksi (presence mode)
 curl -X POST http://localhost:8000/api/detection/start \
   -H "Content-Type: application/json" \
-  -d '{"source_id": 1, "demo_mode": false}'
+  -d '{"source_id": 1, "tracking_mode": "presence"}'
 
-# Detect persons and vehicles
+# Mulai deteksi (counter mode)
 curl -X POST http://localhost:8000/api/detection/start \
   -H "Content-Type: application/json" \
-  -d '{"source_id": 1, "detection_classes": "person,car,motorcycle,bus,truck"}'
+  -d '{"source_id": 1, "tracking_mode": "counter", "detection_classes": "person,car"}'
 ```
 
-### Get Daily Report
-
-```bash
-curl "http://localhost:8000/api/reports/daily?report_date=2025-12-17"
-```
-
-## Project Structure
+## Struktur Proyek
 
 ```
 time-tracker/
-├── main.py                 # FastAPI application entry
-├── config.py               # Configuration settings
-├── requirements.txt        # Python dependencies
-├── models/                 # YOLO model files
-│   └── yolov8n.pt
+├── main.py                 # Entry point FastAPI
+├── config.py               # Konfigurasi
+├── models/                 # File model YOLO
 ├── src/
-│   ├── api/
-│   │   ├── routes.py       # REST API endpoints
-│   │   ├── schemas.py      # Pydantic models
-│   │   └── websocket.py    # WebSocket & detection pipeline
-│   ├── database/
-│   │   ├── models.py       # SQLAlchemy models
-│   │   └── crud.py         # Database operations
-│   ├── detection/
-│   │   ├── yolo_detector.py    # YOLO wrapper
-│   │   ├── face_recognizer.py  # Face recognition
-│   │   └── tracker.py          # Object tracking
-│   ├── tracking/
-│   │   ├── session_manager.py  # Session management
-│   │   └── time_calculator.py  # Time calculations
-│   └── video/
-│       └── capture.py      # Video source handling
-├── static/
-│   ├── css/style.css
-│   └── js/app.js
-├── templates/
-│   └── index.html
-├── uploads/                # Face photo uploads
-└── data/
-    └── timetracker.db      # SQLite database
+│   ├── api/                # Routes, schemas, websocket
+│   ├── database/           # Models, CRUD
+│   ├── detection/          # YOLO, face recognition, tracker
+│   ├── tracking/           # Session manager
+│   └── video/              # Video capture
+├── static/                 # CSS, JS
+├── templates/              # HTML
+└── data/                   # Database SQLite
 ```
-
-## Demo Mode
-
-For testing without a YOLO model or camera:
-
-1. Check "Demo Mode" in the UI before starting detection
-2. Or via API:
-   ```bash
-   curl -X POST http://localhost:8000/api/detection/start \
-     -H "Content-Type: application/json" \
-     -d '{"source_id": 1, "demo_mode": true}'
-   ```
-
-Demo mode simulates person detection with mock data.
 
 ## Deployment
 
-### Production with Uvicorn
-
 ```bash
+# Production
 uvicorn main:app --host 0.0.0.0 --port 8000 --workers 1
-```
 
-Note: Use only 1 worker since the detection pipeline uses shared state.
-
-### With GPU (NVIDIA T4 or similar)
-
-1. Install CUDA drivers
-2. Install PyTorch with CUDA support:
-   ```bash
-   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
-   ```
-3. Set device in config:
-   ```env
-   YOLO_DEVICE=cuda
-   FACE_RECOGNITION_MODEL=cnn
-   ```
-
-### Docker (Optional)
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-EXPOSE 8000
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Dengan GPU
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# Set YOLO_DEVICE=cuda di .env
 ```
 
 ## Troubleshooting
 
-### Face recognition not working
+| Masalah | Solusi |
+|---------|--------|
+| Face recognition error | Install dlib, cek foto wajah jelas |
+| YOLO tidak load | Cek file models/yolov8n.pt |
+| Webcam client error | Butuh HTTPS untuk remote (localhost OK) |
+| FPS rendah | Naikkan FRAME_SKIP, gunakan yolov8n |
 
-- Ensure `dlib` is properly installed
-- Check that uploaded photos clearly show faces
-- Try adjusting `FACE_RECOGNITION_TOLERANCE` (lower = stricter)
-
-### YOLO model not loading
-
-- Verify model file exists in `models/yolov8n.pt`
-- Check file permissions
-- Try downloading the model again
-- **PyTorch 2.6+ users**: The app includes a fix for the `weights_only=True` default change
-
-### Client webcam not working
-
-- **HTTPS required**: Remote webcam access requires HTTPS (works without on localhost)
-- Check browser permissions for camera access
-- Ensure no other application is using the webcam
-- Try a different browser if issues persist
-
-### WebSocket connection failing
-
-- Ensure you're using the correct protocol (ws:// or wss://)
-- Check if detection is running before connecting
-
-### Low FPS
-
-- Increase `FRAME_SKIP` value
-- Use a smaller YOLO model (yolov8n)
-- Enable GPU acceleration
-
-## License
+## Lisensi
 
 MIT License
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
