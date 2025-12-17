@@ -272,25 +272,48 @@ class TimeTrackerApp {
 
         const demoMode = this.elements.demoMode.checked;
 
+        // Check if we're on HTTPS (required for remote webcam access)
+        if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+            alert('Webcam access requires HTTPS when not on localhost. Please use HTTPS or access from localhost.');
+            return;
+        }
+
         try {
             // Request webcam access
+            console.log('Requesting webcam access...');
             this.localStream = await navigator.mediaDevices.getUserMedia({
                 video: { width: 640, height: 480, facingMode: 'user' }
             });
+            console.log('Webcam access granted');
 
             // Create hidden video element for capture
             this.localVideo = document.createElement('video');
             this.localVideo.srcObject = this.localStream;
-            this.localVideo.play();
+            this.localVideo.setAttribute('playsinline', 'true'); // Required for iOS
+            this.localVideo.muted = true;
+
+            // Wait for video to be ready
+            await new Promise((resolve, reject) => {
+                this.localVideo.onloadedmetadata = () => {
+                    console.log('Video metadata loaded');
+                    resolve();
+                };
+                this.localVideo.onerror = reject;
+                setTimeout(() => reject(new Error('Video load timeout')), 10000);
+            });
+
+            await this.localVideo.play();
+            console.log('Video playing');
 
             // Create canvas for frame capture
             this.captureCanvas = document.createElement('canvas');
-            this.captureCanvas.width = 640;
-            this.captureCanvas.height = 480;
+            this.captureCanvas.width = this.localVideo.videoWidth || 640;
+            this.captureCanvas.height = this.localVideo.videoHeight || 480;
 
             // Connect to client-cam WebSocket
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${wsProtocol}//${window.location.host}/ws/client-cam?demo=${demoMode}`;
+            console.log('Connecting to WebSocket:', wsUrl);
 
             this.wsClientCam = new WebSocket(wsUrl);
 
