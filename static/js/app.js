@@ -19,6 +19,7 @@ class TimeTrackerApp {
             videoFeed: document.getElementById('video-feed'),
             videoPlaceholder: document.getElementById('video-placeholder'),
             sourceSelect: document.getElementById('source-select'),
+            detectionClasses: document.getElementById('detection-classes'),
             demoMode: document.getElementById('demo-mode'),
             startBtn: document.getElementById('start-detection'),
             stopBtn: document.getElementById('stop-detection'),
@@ -212,6 +213,7 @@ class TimeTrackerApp {
         }
 
         const demoMode = this.elements.demoMode.checked;
+        const detectionClasses = this.elements.detectionClasses.value;
 
         try {
             const response = await fetch('/api/detection/start', {
@@ -221,7 +223,8 @@ class TimeTrackerApp {
                     source_id: parseInt(sourceId),
                     demo_mode: demoMode,
                     frame_skip: 2,
-                    confidence_threshold: 0.5
+                    confidence_threshold: 0.5,
+                    detection_classes: detectionClasses
                 })
             });
 
@@ -283,6 +286,7 @@ class TimeTrackerApp {
         }
 
         const demoMode = this.elements.demoMode.checked;
+        const detectionClasses = this.elements.detectionClasses.value;
 
         // Check if we're on HTTPS (required for remote webcam access)
         if (window.location.protocol !== 'https:' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
@@ -324,7 +328,7 @@ class TimeTrackerApp {
 
             // Connect to client-cam WebSocket
             const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${wsProtocol}//${window.location.host}/ws/client-cam?demo=${demoMode}`;
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/client-cam?demo=${demoMode}&classes=${encodeURIComponent(detectionClasses)}`;
             console.log('Connecting to WebSocket:', wsUrl);
 
             this.wsClientCam = new WebSocket(wsUrl);
