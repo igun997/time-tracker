@@ -57,11 +57,23 @@ class TimeTrackerApp {
     }
 
     bindEvents() {
+        console.log('Binding events...');
+
         // Detection controls
         this.elements.startBtn.addEventListener('click', () => this.startDetection());
         this.elements.stopBtn.addEventListener('click', () => this.stopDetection());
         document.getElementById('refresh-sources').addEventListener('click', () => this.loadSources());
-        document.getElementById('use-client-cam').addEventListener('click', () => this.startClientCam());
+
+        const clientCamBtn = document.getElementById('use-client-cam');
+        console.log('Client cam button:', clientCamBtn);
+        if (clientCamBtn) {
+            clientCamBtn.addEventListener('click', () => {
+                console.log('Client cam button clicked!');
+                this.startClientCam();
+            });
+        } else {
+            console.error('Client cam button not found!');
+        }
 
         // Tab navigation
         document.querySelectorAll('.tab').forEach(tab => {
