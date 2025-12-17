@@ -179,7 +179,15 @@ class FaceRecognizer:
                 return None
 
             # Get encoding for the first face
-            face_encodings = face_recognition.face_encodings(rgb_crop, face_locations)
+            try:
+                face_encodings = face_recognition.face_encodings(rgb_crop, face_locations, num_jitters=1)
+            except Exception as enc_error:
+                # Fallback: try without specifying locations
+                try:
+                    face_encodings = face_recognition.face_encodings(rgb_crop)
+                except Exception:
+                    print(f"Face encoding failed: {enc_error}")
+                    return None
 
             if not face_encodings:
                 return None

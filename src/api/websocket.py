@@ -300,7 +300,7 @@ class DetectionPipeline:
             for p in tracked_persons:
                 class_counts[p.class_name] = class_counts.get(p.class_name, 0) + 1
 
-            # Prepare response data
+            # Prepare response data (convert numpy types to native Python types for JSON)
             response = {
                 "type": "frame",
                 "timestamp": time.time(),
@@ -308,16 +308,16 @@ class DetectionPipeline:
                 "frame": result_base64,
                 "detections": [
                     {
-                        "track_id": p.track_id,
-                        "class_id": p.class_id,
-                        "class_name": p.class_name,
-                        "employee_id": p.employee_id,
-                        "name": p.display_name,
-                        "bbox": list(p.bbox),
+                        "track_id": int(p.track_id) if p.track_id is not None else None,
+                        "class_id": int(p.class_id),
+                        "class_name": str(p.class_name),
+                        "employee_id": int(p.employee_id) if p.employee_id is not None else None,
+                        "name": str(p.display_name),
+                        "bbox": [int(x) for x in p.bbox],
                         "duration_seconds": int(p.duration_seconds),
-                        "is_identified": p.is_identified,
-                        "is_person": p.is_person,
-                        "is_vehicle": p.is_vehicle
+                        "is_identified": bool(p.is_identified),
+                        "is_person": bool(p.is_person),
+                        "is_vehicle": bool(p.is_vehicle)
                     }
                     for p in tracked_persons
                 ],
@@ -407,7 +407,7 @@ class DetectionPipeline:
                 for p in tracked_persons:
                     class_counts[p.class_name] = class_counts.get(p.class_name, 0) + 1
 
-                # Prepare response data
+                # Prepare response data (convert numpy types to native Python types for JSON)
                 response = {
                     "type": "frame",
                     "timestamp": frame_data.timestamp,
@@ -415,16 +415,16 @@ class DetectionPipeline:
                     "frame": frame_base64,
                     "detections": [
                         {
-                            "track_id": p.track_id,
-                            "class_id": p.class_id,
-                            "class_name": p.class_name,
-                            "employee_id": p.employee_id,
-                            "name": p.display_name,
-                            "bbox": list(p.bbox),
+                            "track_id": int(p.track_id) if p.track_id is not None else None,
+                            "class_id": int(p.class_id),
+                            "class_name": str(p.class_name),
+                            "employee_id": int(p.employee_id) if p.employee_id is not None else None,
+                            "name": str(p.display_name),
+                            "bbox": [int(x) for x in p.bbox],
                             "duration_seconds": int(p.duration_seconds),
-                            "is_identified": p.is_identified,
-                            "is_person": p.is_person,
-                            "is_vehicle": p.is_vehicle
+                            "is_identified": bool(p.is_identified),
+                            "is_person": bool(p.is_person),
+                            "is_vehicle": bool(p.is_vehicle)
                         }
                         for p in tracked_persons
                     ],
