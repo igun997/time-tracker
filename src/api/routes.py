@@ -441,11 +441,11 @@ async def get_object_counts_report(
         hourly_data = await crud.get_hourly_counts(db, count_date, source_name)
         hourly_breakdown = [
             HourlyCountResponse(
-                hour=r["hour"],
-                class_id=r["class_id"],
-                class_name=r["class_name"],
-                entry_count=r["entry_count"],
-                exit_count=r["exit_count"]
+                hour=r.hour,
+                class_id=r.class_id,
+                class_name=r.class_name,
+                entry_count=r.entry_count or 0,
+                exit_count=r.exit_count or 0
             )
             for r in hourly_data
         ]
