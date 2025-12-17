@@ -4,8 +4,14 @@ class TimeTrackerApp {
     constructor() {
         this.ws = null;
         this.wsEvents = null;
+        this.wsClientCam = null;
         this.isConnected = false;
         this.isDetectionRunning = false;
+        this.isClientCamMode = false;
+        this.localStream = null;
+        this.localVideo = null;
+        this.captureCanvas = null;
+        this.captureInterval = null;
 
         this.elements = {
             connectionStatus: document.getElementById('connection-status'),
@@ -55,6 +61,7 @@ class TimeTrackerApp {
         this.elements.startBtn.addEventListener('click', () => this.startDetection());
         this.elements.stopBtn.addEventListener('click', () => this.stopDetection());
         document.getElementById('refresh-sources').addEventListener('click', () => this.loadSources());
+        document.getElementById('use-client-cam').addEventListener('click', () => this.startClientCam());
 
         // Tab navigation
         document.querySelectorAll('.tab').forEach(tab => {
@@ -150,15 +157,34 @@ class TimeTrackerApp {
             this.elements.videoFeed.src = `data:image/jpeg;base64,${data.frame}`;
             this.elements.videoPlaceholder.classList.add('hidden');
 
-            // Update stats
+            // Update stats - handle both old (persons) and new (detections) format
             this.elements.statFps.textContent = data.stats.fps.toFixed(1);
-            this.elements.statPersons.textContent = data.stats.active_persons;
-            this.elements.statIdentified.textContent = data.stats.identified;
             this.elements.statUptime.textContent = this.formatDuration(data.stats.uptime);
 
-            // Update persons list
-            this.updatePersonsList(data.persons);
+            // New format with class counts
+            if (data.stats.total_objects !== undefined) {
+                this.elements.statPersons.textContent = data.stats.total_objects;
+                this.elements.statIdentified.textContent = data.stats.identified || 0;
+
+                // Update class counts in UI if available
+                if (data.stats.class_counts) {
+                    this.updateClassCounts(data.stats.class_counts);
+                }
+            } else {
+                // Old format fallback
+                this.elements.statPersons.textContent = data.stats.active_persons || 0;
+                this.elements.statIdentified.textContent = data.stats.identified || 0;
+            }
+
+            // Update detections list - handle both formats
+            const detections = data.detections || data.persons || [];
+            this.updateDetectionsList(detections);
         }
+    }
+
+    updateClassCounts(classCounts) {
+        // Could update a dedicated UI element for class counts
+        // For now, the counts are shown in the video overlay
     }
 
     handleEvent(data) {
@@ -209,6 +235,12 @@ class TimeTrackerApp {
 
     async stopDetection() {
         try {
+            // If in client cam mode, stop it differently
+            if (this.isClientCamMode) {
+                this.stopClientCam();
+                return;
+            }
+
             const response = await fetch('/api/detection/stop', { method: 'POST' });
 
             if (!response.ok) {
@@ -229,6 +261,160 @@ class TimeTrackerApp {
         } catch (error) {
             alert(`Error: ${error.message}`);
         }
+    }
+
+    // Client Webcam Mode - Stream local webcam to server for processing
+    async startClientCam() {
+        if (this.isDetectionRunning) {
+            alert('Detection is already running. Stop it first.');
+            return;
+        }
+
+        const demoMode = this.elements.demoMode.checked;
+
+        try {
+            // Request webcam access
+            this.localStream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480, facingMode: 'user' }
+            });
+
+            // Create hidden video element for capture
+            this.localVideo = document.createElement('video');
+            this.localVideo.srcObject = this.localStream;
+            this.localVideo.play();
+
+            // Create canvas for frame capture
+            this.captureCanvas = document.createElement('canvas');
+            this.captureCanvas.width = 640;
+            this.captureCanvas.height = 480;
+
+            // Connect to client-cam WebSocket
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/client-cam?demo=${demoMode}`;
+
+            this.wsClientCam = new WebSocket(wsUrl);
+
+            this.wsClientCam.onopen = () => {
+                this.isConnected = true;
+                this.isClientCamMode = true;
+                this.isDetectionRunning = true;
+
+                this.elements.connectionStatus.textContent = 'Connected (Client Cam)';
+                this.elements.connectionStatus.classList.remove('disconnected');
+                this.elements.connectionStatus.classList.add('connected');
+
+                this.elements.startBtn.disabled = true;
+                this.elements.stopBtn.disabled = false;
+                this.elements.detectionStatus.textContent = 'Client Cam Running';
+                this.elements.detectionStatus.classList.remove('stopped');
+                this.elements.detectionStatus.classList.add('running');
+
+                // Start sending frames
+                this.startFrameCapture();
+            };
+
+            this.wsClientCam.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'error') {
+                    alert(`Server error: ${data.message}`);
+                    this.stopClientCam();
+                    return;
+                }
+
+                if (data.type === 'frame') {
+                    this.handleFrame(data);
+                }
+            };
+
+            this.wsClientCam.onclose = () => {
+                this.stopClientCam();
+            };
+
+            this.wsClientCam.onerror = (error) => {
+                console.error('Client cam WebSocket error:', error);
+                this.stopClientCam();
+            };
+
+        } catch (error) {
+            console.error('Client cam error:', error);
+            if (error.name === 'NotAllowedError') {
+                alert('Camera access denied. Please allow camera access and try again.');
+            } else if (error.name === 'NotFoundError') {
+                alert('No camera found. Please connect a camera and try again.');
+            } else {
+                alert(`Error: ${error.message}`);
+            }
+        }
+    }
+
+    startFrameCapture() {
+        const ctx = this.captureCanvas.getContext('2d');
+        const frameRate = 10; // Send 10 frames per second
+
+        this.captureInterval = setInterval(() => {
+            if (!this.localVideo || !this.wsClientCam || this.wsClientCam.readyState !== WebSocket.OPEN) {
+                return;
+            }
+
+            // Draw video frame to canvas
+            ctx.drawImage(this.localVideo, 0, 0, 640, 480);
+
+            // Convert to base64 JPEG
+            const dataUrl = this.captureCanvas.toDataURL('image/jpeg', 0.8);
+            const base64Data = dataUrl.split(',')[1];
+
+            // Send to server
+            this.wsClientCam.send(JSON.stringify({
+                type: 'frame',
+                frame: base64Data
+            }));
+        }, 1000 / frameRate);
+    }
+
+    stopClientCam() {
+        // Stop frame capture
+        if (this.captureInterval) {
+            clearInterval(this.captureInterval);
+            this.captureInterval = null;
+        }
+
+        // Stop local video stream
+        if (this.localStream) {
+            this.localStream.getTracks().forEach(track => track.stop());
+            this.localStream = null;
+        }
+
+        // Close WebSocket
+        if (this.wsClientCam) {
+            if (this.wsClientCam.readyState === WebSocket.OPEN) {
+                this.wsClientCam.send(JSON.stringify({ type: 'stop' }));
+            }
+            this.wsClientCam.close();
+            this.wsClientCam = null;
+        }
+
+        // Clean up elements
+        this.localVideo = null;
+        this.captureCanvas = null;
+
+        // Update UI state
+        this.isConnected = false;
+        this.isClientCamMode = false;
+        this.isDetectionRunning = false;
+
+        this.elements.connectionStatus.textContent = 'Disconnected';
+        this.elements.connectionStatus.classList.remove('connected');
+        this.elements.connectionStatus.classList.add('disconnected');
+
+        this.elements.startBtn.disabled = false;
+        this.elements.stopBtn.disabled = true;
+        this.elements.detectionStatus.textContent = 'Detection Stopped';
+        this.elements.detectionStatus.classList.remove('running');
+        this.elements.detectionStatus.classList.add('stopped');
+
+        this.elements.videoPlaceholder.classList.remove('hidden');
+        this.elements.videoFeed.src = '';
     }
 
     // Data Loading
@@ -297,29 +483,51 @@ class TimeTrackerApp {
     }
 
     // UI Updates
-    updatePersonsList(persons) {
-        if (persons.length === 0) {
-            this.elements.personsList.innerHTML = '<p class="empty-message">No persons detected</p>';
+    updateDetectionsList(detections) {
+        if (detections.length === 0) {
+            this.elements.personsList.innerHTML = '<p class="empty-message">No objects detected</p>';
             return;
         }
 
-        this.elements.personsList.innerHTML = persons.map(person => `
+        this.elements.personsList.innerHTML = detections.map(obj => {
+            const isPerson = obj.is_person || obj.class_id === 0 || !obj.class_id;
+            const isVehicle = obj.is_vehicle || [1,2,3,5,6,7,8].includes(obj.class_id);
+            const className = obj.class_name || 'person';
+
+            // Determine CSS class for styling
+            let statusClass = 'unknown';
+            if (obj.is_identified) {
+                statusClass = 'identified';
+            } else if (isVehicle) {
+                statusClass = 'vehicle';
+            }
+
+            // Only show identify button for unidentified persons
+            const showIdentify = isPerson && !obj.is_identified;
+
+            return `
             <div class="person-card">
                 <div class="person-info">
-                    <div class="person-name ${person.is_identified ? 'identified' : 'unknown'}">
-                        ${person.name}
+                    <div class="person-name ${statusClass}">
+                        ${obj.name}
+                        <span class="class-badge">${className}</span>
                     </div>
-                    <div class="person-duration">${this.formatDuration(person.duration_seconds)}</div>
+                    <div class="person-duration">${this.formatDuration(obj.duration_seconds)}</div>
                 </div>
-                ${!person.is_identified ? `
+                ${showIdentify ? `
                     <div class="person-actions">
-                        <button class="btn btn-small" onclick="app.showIdentifyModal(${person.track_id})">
+                        <button class="btn btn-small" onclick="app.showIdentifyModal(${obj.track_id})">
                             Identify
                         </button>
                     </div>
                 ` : ''}
             </div>
-        `).join('');
+        `}).join('');
+    }
+
+    // Keep old method name for backwards compatibility
+    updatePersonsList(persons) {
+        this.updateDetectionsList(persons);
     }
 
     updateEmployeesTable(employees) {

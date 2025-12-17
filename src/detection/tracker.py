@@ -5,15 +5,17 @@ import numpy as np
 from scipy.spatial import distance as dist
 import time
 
-from .yolo_detector import PersonDetection
+from .yolo_detector import Detection, PersonDetection  # PersonDetection is alias for backward compat
 
 
 @dataclass
-class TrackedPerson:
-    """Represents a tracked person with identity and history"""
+class TrackedObject:
+    """Represents a tracked object with identity and history"""
     track_id: int
     centroid: Tuple[int, int]
     bbox: Tuple[int, int, int, int]
+    class_id: int = 0
+    class_name: str = "person"
     employee_id: Optional[int] = None
     employee_name: Optional[str] = None
     first_seen: float = field(default_factory=time.time)
@@ -25,11 +27,25 @@ class TrackedPerson:
     def display_name(self) -> str:
         if self.employee_name:
             return self.employee_name
-        return f"Unknown-{self.track_id}"
+        if self.class_id == 0:  # person
+            return f"Unknown-{self.track_id}"
+        return f"{self.class_name}-{self.track_id}"
 
     @property
     def duration_seconds(self) -> float:
         return self.last_seen - self.first_seen
+
+    @property
+    def is_person(self) -> bool:
+        return self.class_id == 0
+
+    @property
+    def is_vehicle(self) -> bool:
+        return self.class_id in [1, 2, 3, 5, 6, 7, 8]
+
+
+# Alias for backwards compatibility
+TrackedPerson = TrackedObject
 
 
 class CentroidTracker:
@@ -55,15 +71,15 @@ class CentroidTracker:
         self._objects: OrderedDict[int, TrackedPerson] = OrderedDict()
         self._disappeared: Dict[int, int] = {}
 
-    def update(self, detections: List[PersonDetection]) -> List[TrackedPerson]:
+    def update(self, detections: List[Detection]) -> List[TrackedObject]:
         """
         Update tracker with new detections
 
         Args:
-            detections: List of PersonDetection from YOLO
+            detections: List of Detection from YOLO
 
         Returns:
-            List of currently tracked persons
+            List of currently tracked objects
         """
         current_time = time.time()
 
@@ -77,14 +93,22 @@ class CentroidTracker:
 
             return list(self._objects.values())
 
-        # Get input centroids
+        # Get input centroids and metadata
         input_centroids = np.array([d.center for d in detections])
         input_bboxes = [d.bbox for d in detections]
+        input_class_ids = [d.class_id for d in detections]
+        input_class_names = [d.class_name for d in detections]
 
         # If we have no existing objects, register all detections
         if len(self._objects) == 0:
-            for i, (centroid, bbox) in enumerate(zip(input_centroids, input_bboxes)):
-                self._register(tuple(centroid), bbox, current_time)
+            for i in range(len(detections)):
+                self._register(
+                    tuple(input_centroids[i]),
+                    input_bboxes[i],
+                    input_class_ids[i],
+                    input_class_names[i],
+                    current_time
+                )
         else:
             # Match existing objects with new detections
             object_ids = list(self._objects.keys())
@@ -133,6 +157,8 @@ class CentroidTracker:
                 self._register(
                     tuple(input_centroids[col]),
                     input_bboxes[col],
+                    input_class_ids[col],
+                    input_class_names[col],
                     current_time
                 )
 
@@ -142,13 +168,17 @@ class CentroidTracker:
         self,
         centroid: Tuple[int, int],
         bbox: Tuple[int, int, int, int],
+        class_id: int,
+        class_name: str,
         timestamp: float
     ):
         """Register a new tracked object"""
-        self._objects[self._next_id] = TrackedPerson(
+        self._objects[self._next_id] = TrackedObject(
             track_id=self._next_id,
             centroid=centroid,
             bbox=bbox,
+            class_id=class_id,
+            class_name=class_name,
             first_seen=timestamp,
             last_seen=timestamp
         )

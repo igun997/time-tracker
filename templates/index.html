@@ -34,7 +34,7 @@
                         <span id="stat-fps" class="stat-value">0</span>
                     </div>
                     <div class="stat">
-                        <span class="stat-label">Persons</span>
+                        <span class="stat-label">Objects</span>
                         <span id="stat-persons" class="stat-value">0</span>
                     </div>
                     <div class="stat">
@@ -69,13 +69,20 @@
                         <button id="start-detection" class="btn btn-primary">Start Detection</button>
                         <button id="stop-detection" class="btn btn-danger" disabled>Stop Detection</button>
                     </div>
+                    <div style="margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid var(--border-color);">
+                        <button id="use-client-cam" class="btn" style="width: 100%;">Use My Webcam (Client Mode)</button>
+                        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.5rem;">
+                            Stream your local webcam to the server for processing.
+                            Use this if the server doesn't have camera access.
+                        </p>
+                    </div>
                 </div>
 
-                <!-- Active Persons -->
+                <!-- Active Detections -->
                 <div class="panel">
-                    <h2>Active Persons</h2>
+                    <h2>Active Detections</h2>
                     <div id="persons-list" class="persons-list">
-                        <p class="empty-message">No persons detected</p>
+                        <p class="empty-message">No objects detected</p>
                     </div>
                 </div>
 

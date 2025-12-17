@@ -10,9 +10,9 @@ import cv2
 import numpy as np
 from fastapi import WebSocket, WebSocketDisconnect
 
-from config import settings
+from config import settings, parse_detection_classes, get_class_name, COCO_CLASSES
 from src.video.capture import VideoCapture, VideoSourceFactory, FrameData
-from src.detection.yolo_detector import create_detector, PersonDetection
+from src.detection.yolo_detector import create_detector, Detection
 from src.detection.face_recognizer import create_face_recognizer
 from src.detection.tracker import PersonTracker, TrackedPerson
 from src.tracking.session_manager import SessionManager, SessionEvent
@@ -28,6 +28,8 @@ class DetectionState:
     active_persons: int = 0
     identified_persons: int = 0
     demo_mode: bool = False
+    client_mode: bool = False  # True when receiving frames from client webcam
+    detection_classes: List[int] = field(default_factory=lambda: [0])  # Classes being detected
 
 
 class ConnectionManager:
@@ -96,6 +98,7 @@ class DetectionPipeline:
         demo_mode: bool = False,
         frame_skip: int = 2,
         confidence_threshold: float = 0.5,
+        detection_classes: Optional[str] = None,
         db_session_callback=None
     ) -> bool:
         """Start the detection pipeline"""
@@ -103,6 +106,10 @@ class DetectionPipeline:
             return False
 
         try:
+            # Parse detection classes
+            classes_str = detection_classes or settings.yolo_classes
+            class_ids = parse_detection_classes(classes_str)
+
             # Create video source
             video_source = VideoSourceFactory.create(
                 source_type,
@@ -120,18 +127,19 @@ class DetectionPipeline:
             if not self._video_capture.start():
                 return False
 
-            # Create detector
+            # Create detector with configured classes
             self._detector = create_detector(
                 model_path=settings.yolo_model_path,
                 confidence_threshold=confidence_threshold,
                 device=settings.yolo_device,
-                demo_mode=demo_mode
+                demo_mode=demo_mode,
+                classes=class_ids
             )
 
             if not demo_mode:
                 self._detector.load_model()
 
-            # Create face recognizer
+            # Create face recognizer (only useful for person detection)
             self._face_recognizer = create_face_recognizer(
                 tolerance=settings.face_recognition_tolerance,
                 model=settings.face_recognition_model,
@@ -157,7 +165,8 @@ class DetectionPipeline:
                 is_running=True,
                 source_name=source_name,
                 start_time=time.time(),
-                demo_mode=demo_mode
+                demo_mode=demo_mode,
+                detection_classes=class_ids
             )
 
             # Start processing task
@@ -170,6 +179,164 @@ class DetectionPipeline:
             print(f"Error starting detection: {e}")
             self.stop()
             return False
+
+    async def start_client_mode(
+        self,
+        source_name: str = "Client Webcam",
+        demo_mode: bool = False,
+        confidence_threshold: float = 0.5,
+        detection_classes: Optional[str] = None,
+        db_session_callback=None
+    ) -> bool:
+        """Start detection pipeline in client mode (receiving frames via WebSocket)"""
+        if self.state.is_running:
+            return False
+
+        try:
+            # Parse detection classes
+            classes_str = detection_classes or settings.yolo_classes
+            class_ids = parse_detection_classes(classes_str)
+
+            # Create detector with configured classes
+            self._detector = create_detector(
+                model_path=settings.yolo_model_path,
+                confidence_threshold=confidence_threshold,
+                device=settings.yolo_device,
+                demo_mode=demo_mode,
+                classes=class_ids
+            )
+
+            if not demo_mode:
+                self._detector.load_model()
+
+            # Create face recognizer (only useful for person detection)
+            self._face_recognizer = create_face_recognizer(
+                tolerance=settings.face_recognition_tolerance,
+                model=settings.face_recognition_model,
+                demo_mode=demo_mode
+            )
+
+            # Create tracker
+            self._tracker = PersonTracker(
+                max_disappeared=30,
+                max_distance=100.0
+            )
+
+            # Create session manager
+            self._session_manager = SessionManager(
+                source_name=source_name,
+                timeout_seconds=settings.track_timeout_seconds,
+                min_session_seconds=settings.min_session_seconds,
+                on_session_end=db_session_callback
+            )
+
+            # Update state
+            self.state = DetectionState(
+                is_running=True,
+                source_name=source_name,
+                start_time=time.time(),
+                demo_mode=demo_mode,
+                client_mode=True,
+                detection_classes=class_ids
+            )
+
+            return True
+
+        except Exception as e:
+            print(f"Error starting client mode detection: {e}")
+            self.stop()
+            return False
+
+    async def process_client_frame(self, frame_base64: str) -> Optional[dict]:
+        """Process a frame received from client webcam"""
+        if not self.state.is_running or not self.state.client_mode:
+            return None
+
+        try:
+            # Decode base64 frame
+            frame_data = base64.b64decode(frame_base64)
+            np_arr = np.frombuffer(frame_data, np.uint8)
+            frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+            if frame is None:
+                return None
+
+            self.state.frames_processed += 1
+
+            # Run detection
+            detections = self._detector.detect(frame, use_tracking=True)
+
+            # Update tracker
+            tracked_persons = self._tracker.update(
+                detections,
+                frame,
+                self._face_recognizer
+            )
+
+            # Update sessions
+            if self._session_manager:
+                events = self._session_manager.update(tracked_persons)
+                for event in events:
+                    await self.connection_manager.broadcast_event(event.to_dict())
+
+            # Update state
+            self.state.active_persons = len(tracked_persons)
+            self.state.identified_persons = sum(
+                1 for p in tracked_persons if p.is_identified
+            )
+
+            # Draw annotations and encode frame
+            annotated_frame = self._draw_annotations(frame, tracked_persons)
+
+            # Encode frame as JPEG
+            _, buffer = cv2.imencode(
+                '.jpg', annotated_frame,
+                [cv2.IMWRITE_JPEG_QUALITY, settings.jpeg_quality]
+            )
+            result_base64 = base64.b64encode(buffer).decode('utf-8')
+
+            # Count by class
+            class_counts = {}
+            for p in tracked_persons:
+                class_counts[p.class_name] = class_counts.get(p.class_name, 0) + 1
+
+            # Prepare response data
+            response = {
+                "type": "frame",
+                "timestamp": time.time(),
+                "frame_number": self.state.frames_processed,
+                "frame": result_base64,
+                "detections": [
+                    {
+                        "track_id": p.track_id,
+                        "class_id": p.class_id,
+                        "class_name": p.class_name,
+                        "employee_id": p.employee_id,
+                        "name": p.display_name,
+                        "bbox": list(p.bbox),
+                        "duration_seconds": int(p.duration_seconds),
+                        "is_identified": p.is_identified,
+                        "is_person": p.is_person,
+                        "is_vehicle": p.is_vehicle
+                    }
+                    for p in tracked_persons
+                ],
+                "stats": {
+                    "total_objects": len(tracked_persons),
+                    "active_persons": sum(1 for p in tracked_persons if p.is_person),
+                    "active_vehicles": sum(1 for p in tracked_persons if p.is_vehicle),
+                    "identified": self.state.identified_persons,
+                    "class_counts": class_counts,
+                    "uptime": int(time.time() - self.state.start_time),
+                    "fps": self.state.frames_processed / max(1, time.time() - self.state.start_time)
+                }
+            }
+
+            return response
+
+        except Exception as e:
+            print(f"Error processing client frame: {e}")
+            return None
 
     def stop(self):
         """Stop the detection pipeline"""
@@ -235,27 +402,38 @@ class DetectionPipeline:
                 )
                 frame_base64 = base64.b64encode(buffer).decode('utf-8')
 
+                # Count by class
+                class_counts = {}
+                for p in tracked_persons:
+                    class_counts[p.class_name] = class_counts.get(p.class_name, 0) + 1
+
                 # Prepare response data
                 response = {
                     "type": "frame",
                     "timestamp": frame_data.timestamp,
                     "frame_number": self.state.frames_processed,
                     "frame": frame_base64,
-                    "persons": [
+                    "detections": [
                         {
                             "track_id": p.track_id,
+                            "class_id": p.class_id,
+                            "class_name": p.class_name,
                             "employee_id": p.employee_id,
                             "name": p.display_name,
                             "bbox": list(p.bbox),
                             "duration_seconds": int(p.duration_seconds),
-                            "is_identified": p.is_identified
+                            "is_identified": p.is_identified,
+                            "is_person": p.is_person,
+                            "is_vehicle": p.is_vehicle
                         }
                         for p in tracked_persons
                     ],
                     "stats": {
-                        "active_persons": self.state.active_persons,
+                        "total_objects": len(tracked_persons),
+                        "active_persons": sum(1 for p in tracked_persons if p.is_person),
+                        "active_vehicles": sum(1 for p in tracked_persons if p.is_vehicle),
                         "identified": self.state.identified_persons,
-                        "unknown": self.state.active_persons - self.state.identified_persons,
+                        "class_counts": class_counts,
                         "uptime": int(time.time() - self.state.start_time),
                         "fps": self.state.frames_processed / max(1, time.time() - self.state.start_time)
                     }
@@ -274,29 +452,47 @@ class DetectionPipeline:
         finally:
             self.state.is_running = False
 
+    def _get_class_color(self, obj) -> tuple:
+        """Get color based on object class and identification status"""
+        # Color palette for different object types (BGR format)
+        CLASS_COLORS = {
+            0: (0, 255, 0),      # person - green
+            1: (255, 165, 0),    # bicycle - orange
+            2: (255, 0, 0),      # car - blue
+            3: (0, 255, 255),    # motorcycle - yellow
+            5: (255, 0, 255),    # bus - magenta
+            7: (0, 128, 255),    # truck - orange-red
+            9: (0, 255, 128),    # traffic light - cyan-green
+        }
+
+        if obj.is_person:
+            if obj.is_identified:
+                return (0, 255, 0)    # Green for identified person
+            else:
+                return (0, 165, 255)  # Orange for unknown person
+        else:
+            return CLASS_COLORS.get(obj.class_id, (128, 128, 128))  # Default gray
+
     def _draw_annotations(
         self,
         frame: np.ndarray,
-        tracked_persons: List[TrackedPerson]
+        tracked_objects: List[TrackedPerson]
     ) -> np.ndarray:
         """Draw bounding boxes and labels on frame"""
         annotated = frame.copy()
 
-        for person in tracked_persons:
-            x1, y1, x2, y2 = person.bbox
+        for obj in tracked_objects:
+            x1, y1, x2, y2 = obj.bbox
 
-            # Color based on identification status
-            if person.is_identified:
-                color = (0, 255, 0)  # Green for identified
-            else:
-                color = (0, 165, 255)  # Orange for unknown
+            # Color based on class and identification status
+            color = self._get_class_color(obj)
 
             # Draw bounding box
             cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
 
             # Prepare label
-            label = person.display_name
-            duration = int(person.duration_seconds)
+            label = obj.display_name
+            duration = int(obj.duration_seconds)
             if duration > 0:
                 mins, secs = divmod(duration, 60)
                 label += f" ({mins}:{secs:02d})"
@@ -320,9 +516,16 @@ class DetectionPipeline:
                 (255, 255, 255), 2
             )
 
+        # Count by class
+        class_counts = {}
+        for obj in tracked_objects:
+            class_counts[obj.class_name] = class_counts.get(obj.class_name, 0) + 1
+
         # Draw stats overlay
-        stats_text = f"Persons: {len(tracked_persons)} | "
-        stats_text += f"Identified: {sum(1 for p in tracked_persons if p.is_identified)}"
+        stats_parts = []
+        for class_name, count in sorted(class_counts.items()):
+            stats_parts.append(f"{class_name}: {count}")
+        stats_text = " | ".join(stats_parts) if stats_parts else "No detections"
 
         cv2.putText(
             annotated, stats_text,
@@ -335,6 +538,7 @@ class DetectionPipeline:
 
     def get_status(self) -> dict:
         """Get current detection status"""
+        class_names = [get_class_name(c) for c in self.state.detection_classes]
         return {
             "is_running": self.state.is_running,
             "source_name": self.state.source_name,
@@ -343,7 +547,9 @@ class DetectionPipeline:
             "unknown_persons": self.state.active_persons - self.state.identified_persons,
             "uptime_seconds": int(time.time() - self.state.start_time) if self.state.is_running else 0,
             "frames_processed": self.state.frames_processed,
-            "demo_mode": self.state.demo_mode
+            "demo_mode": self.state.demo_mode,
+            "client_mode": self.state.client_mode,
+            "detection_classes": class_names
         }
 
     def manual_identify(self, track_id: int, employee_id: int, employee_name: str):
@@ -388,3 +594,78 @@ async def websocket_events_handler(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         detection_pipeline.connection_manager.disconnect(websocket)
+
+
+async def websocket_client_cam_handler(
+    websocket: WebSocket,
+    demo_mode: bool = False,
+    detection_classes: Optional[str] = None
+):
+    """Handle WebSocket connection for client webcam streaming
+
+    Client sends frames, server processes and returns annotated frames.
+    Protocol:
+    - Client sends: {"type": "frame", "frame": "<base64 jpeg>"}
+    - Server responds: {"type": "frame", "frame": "<annotated base64>", "detections": [...], "stats": {...}}
+    - Client can send: {"type": "stop"} to stop detection
+    """
+    await websocket.accept()
+
+    # Start detection in client mode
+    success = await detection_pipeline.start_client_mode(
+        source_name="Client Webcam",
+        demo_mode=demo_mode,
+        confidence_threshold=settings.yolo_confidence,
+        detection_classes=detection_classes
+    )
+
+    if not success:
+        await websocket.send_json({
+            "type": "error",
+            "message": "Failed to start detection. Is another detection already running?"
+        })
+        await websocket.close()
+        return
+
+    # Get detected classes for response
+    class_names = [get_class_name(c) for c in detection_pipeline.state.detection_classes]
+
+    await websocket.send_json({
+        "type": "started",
+        "message": "Detection started in client mode",
+        "detection_classes": class_names
+    })
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+
+            if message.get("type") == "frame":
+                # Process the frame
+                frame_base64 = message.get("frame", "")
+                if frame_base64:
+                    result = await detection_pipeline.process_client_frame(frame_base64)
+                    if result:
+                        await websocket.send_json(result)
+
+            elif message.get("type") == "stop":
+                detection_pipeline.stop()
+                await websocket.send_json({
+                    "type": "stopped",
+                    "message": "Detection stopped"
+                })
+                break
+
+            elif message.get("type") == "identify":
+                detection_pipeline.manual_identify(
+                    message["track_id"],
+                    message["employee_id"],
+                    message["employee_name"]
+                )
+
+    except WebSocketDisconnect:
+        detection_pipeline.stop()
+    except Exception as e:
+        print(f"Client webcam error: {e}")
+        detection_pipeline.stop()

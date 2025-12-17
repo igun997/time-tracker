@@ -15,7 +15,8 @@ from src.api.routes import router as api_router
 from src.api.websocket import (
     detection_pipeline,
     websocket_stream_handler,
-    websocket_events_handler
+    websocket_events_handler,
+    websocket_client_cam_handler
 )
 from src.api.schemas import DetectionConfig, DetectionStatus, APIStatus
 
@@ -123,6 +124,7 @@ async def start_detection(config: DetectionConfig):
         demo_mode=config.demo_mode,
         frame_skip=config.frame_skip,
         confidence_threshold=config.confidence_threshold,
+        detection_classes=config.detection_classes,
         db_session_callback=lambda s: asyncio.create_task(save_session(s))
     )
 
@@ -133,7 +135,15 @@ async def start_detection(config: DetectionConfig):
     if detection_pipeline._face_recognizer and faces_data:
         detection_pipeline._face_recognizer.load_known_faces(faces_data)
 
-    return {"message": "Detection started", "source": source.name}
+    # Get the actual classes being detected
+    from config import get_class_name
+    detected_classes = [get_class_name(c) for c in detection_pipeline.state.detection_classes]
+
+    return {
+        "message": "Detection started",
+        "source": source.name,
+        "detection_classes": detected_classes
+    }
 
 
 @app.post("/api/detection/stop")
@@ -183,6 +193,29 @@ async def websocket_stream(websocket: WebSocket):
 async def websocket_events(websocket: WebSocket):
     """WebSocket endpoint for session events"""
     await websocket_events_handler(websocket)
+
+
+@app.websocket("/ws/client-cam")
+async def websocket_client_cam(
+    websocket: WebSocket,
+    demo: bool = False,
+    classes: str = None
+):
+    """WebSocket endpoint for client webcam streaming
+
+    Connect to this endpoint to stream your local webcam to the server for processing.
+    The server will process frames and return annotated results.
+
+    Query params:
+        demo: Set to true for demo mode (no YOLO model required)
+        classes: Detection classes (e.g., "person", "traffic", "person,car,motorcycle")
+
+    Protocol:
+        Send: {"type": "frame", "frame": "<base64 jpeg data>"}
+        Receive: {"type": "frame", "frame": "<annotated base64>", "detections": [...], "stats": {...}}
+        Send: {"type": "stop"} to end the session
+    """
+    await websocket_client_cam_handler(websocket, demo_mode=demo, detection_classes=classes)
 
 
 # ============== API Status ==============

@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 
 try:
@@ -9,12 +9,16 @@ try:
 except ImportError:
     YOLO_AVAILABLE = False
 
+from config import COCO_CLASSES, parse_detection_classes, get_class_name
+
 
 @dataclass
-class PersonDetection:
-    """Represents a detected person in a frame"""
+class Detection:
+    """Represents a detected object in a frame"""
     bbox: Tuple[int, int, int, int]  # (x1, y1, x2, y2)
     confidence: float
+    class_id: int = 0
+    class_name: str = "person"
     track_id: Optional[int] = None
 
     @property
@@ -49,8 +53,16 @@ class PersonDetection:
     def area(self) -> int:
         return self.width * self.height
 
+    @property
+    def is_person(self) -> bool:
+        return self.class_id == 0
+
+    @property
+    def is_vehicle(self) -> bool:
+        return self.class_id in [1, 2, 3, 5, 6, 7, 8]  # bicycle, car, motorcycle, bus, train, truck, boat
+
     def crop_from_frame(self, frame: np.ndarray, padding: int = 0) -> np.ndarray:
-        """Extract the person region from frame with optional padding"""
+        """Extract the detected region from frame with optional padding"""
         h, w = frame.shape[:2]
         x1 = max(0, self.x1 - padding)
         y1 = max(0, self.y1 - padding)
@@ -59,21 +71,24 @@ class PersonDetection:
         return frame[y1:y2, x1:x2]
 
 
-class YOLODetector:
-    """YOLO-based person detector"""
+# Alias for backwards compatibility
+PersonDetection = Detection
 
-    # COCO class ID for person
-    PERSON_CLASS_ID = 0
+
+class YOLODetector:
+    """YOLO-based object detector with configurable classes"""
 
     def __init__(
         self,
         model_path: Optional[str] = None,
         confidence_threshold: float = 0.5,
-        device: str = "auto"
+        device: str = "auto",
+        classes: Optional[List[int]] = None
     ):
         self.model_path = model_path
         self.confidence_threshold = confidence_threshold
         self.device = device
+        self.classes = classes if classes is not None else [0]  # Default to person
         self.model = None
         self._is_loaded = False
 
@@ -112,16 +127,16 @@ class YOLODetector:
             print(f"Error loading YOLO model: {e}")
             return False
 
-    def detect(self, frame: np.ndarray, use_tracking: bool = False) -> List[PersonDetection]:
+    def detect(self, frame: np.ndarray, use_tracking: bool = False) -> List[Detection]:
         """
-        Detect persons in a frame
+        Detect objects in a frame
 
         Args:
             frame: BGR image as numpy array
             use_tracking: If True, use YOLO's built-in tracking
 
         Returns:
-            List of PersonDetection objects
+            List of Detection objects
         """
         if not self._is_loaded or self.model is None:
             return self._demo_detect(frame)
@@ -131,14 +146,14 @@ class YOLODetector:
                 results = self.model.track(
                     frame,
                     persist=True,
-                    classes=[self.PERSON_CLASS_ID],
+                    classes=self.classes,
                     conf=self.confidence_threshold,
                     verbose=False
                 )
             else:
                 results = self.model(
                     frame,
-                    classes=[self.PERSON_CLASS_ID],
+                    classes=self.classes,
                     conf=self.confidence_threshold,
                     verbose=False
                 )
@@ -152,15 +167,19 @@ class YOLODetector:
                     # Get bounding box coordinates
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
                     confidence = float(box.conf[0])
+                    class_id = int(box.cls[0])
+                    class_name = get_class_name(class_id)
 
                     # Get track ID if available
                     track_id = None
                     if use_tracking and box.id is not None:
                         track_id = int(box.id[0])
 
-                    detections.append(PersonDetection(
+                    detections.append(Detection(
                         bbox=(x1, y1, x2, y2),
                         confidence=confidence,
+                        class_id=class_id,
+                        class_name=class_name,
                         track_id=track_id
                     ))
 
@@ -196,15 +215,16 @@ class DemoDetector:
     when YOLO model is not available.
     """
 
-    def __init__(self):
+    def __init__(self, classes: Optional[List[int]] = None):
         self._frame_count = 0
         self._mock_persons = []
         self._is_loaded = True
+        self.classes = classes if classes is not None else [0]
 
     def load_model(self) -> bool:
         return True
 
-    def detect(self, frame: np.ndarray, use_tracking: bool = False) -> List[PersonDetection]:
+    def detect(self, frame: np.ndarray, use_tracking: bool = False) -> List[Detection]:
         """Generate mock detections for testing"""
         self._frame_count += 1
 
@@ -212,24 +232,33 @@ class DemoDetector:
         h, w = frame.shape[:2]
         detections = []
 
-        # Simulate 1-3 persons with semi-random positions
         import math
 
-        for i in range(2):
+        # Generate detections for each configured class
+        for idx, class_id in enumerate(self.classes[:3]):  # Limit to 3 classes for demo
             # Create oscillating positions
             t = self._frame_count * 0.05
-            offset = i * 2
+            offset = idx * 2.5
 
-            cx = int(w * 0.3 + w * 0.2 * math.sin(t + offset))
+            cx = int(w * (0.2 + idx * 0.25) + w * 0.1 * math.sin(t + offset))
             cy = int(h * 0.5 + h * 0.1 * math.cos(t * 0.7 + offset))
 
-            # Person-sized bounding box
-            bw, bh = 100, 200
+            # Size based on class type
+            if class_id == 0:  # person
+                bw, bh = 80, 180
+            elif class_id in [2, 5, 7]:  # car, bus, truck
+                bw, bh = 150, 100
+            elif class_id in [1, 3]:  # bicycle, motorcycle
+                bw, bh = 100, 80
+            else:
+                bw, bh = 80, 80
 
-            detections.append(PersonDetection(
+            detections.append(Detection(
                 bbox=(cx - bw // 2, cy - bh // 2, cx + bw // 2, cy + bh // 2),
                 confidence=0.85 + 0.1 * math.sin(t),
-                track_id=i + 1 if use_tracking else None
+                class_id=class_id,
+                class_name=get_class_name(class_id),
+                track_id=(idx + 1) * 100 + class_id if use_tracking else None
             ))
 
         return detections
@@ -247,7 +276,8 @@ def create_detector(
     model_path: Optional[str] = None,
     confidence_threshold: float = 0.5,
     device: str = "auto",
-    demo_mode: bool = False
+    demo_mode: bool = False,
+    classes: Optional[List[int]] = None
 ) -> YOLODetector:
     """
     Factory function to create appropriate detector
@@ -257,17 +287,19 @@ def create_detector(
         confidence_threshold: Detection confidence threshold
         device: Device to use ("auto", "cpu", "cuda")
         demo_mode: If True, return demo detector for testing
+        classes: List of class IDs to detect (default: [0] for person only)
 
     Returns:
         Detector instance
     """
     if demo_mode:
-        return DemoDetector()
+        return DemoDetector(classes=classes)
 
     detector = YOLODetector(
         model_path=model_path,
         confidence_threshold=confidence_threshold,
-        device=device
+        device=device,
+        classes=classes
     )
 
     return detector

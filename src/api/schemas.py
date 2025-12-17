@@ -64,6 +64,11 @@ class DetectionConfig(BaseModel):
     demo_mode: bool = False
     frame_skip: int = Field(2, ge=1, le=10)
     confidence_threshold: float = Field(0.5, ge=0.1, le=1.0)
+    detection_classes: Optional[str] = Field(
+        None,
+        description="Classes to detect. Can be: class names (person,car,motorcycle), "
+                    "class IDs (0,2,3), or predefined groups (vehicles, traffic, persons)"
+    )
 
 
 class DetectionStatus(BaseModel):
@@ -74,22 +79,34 @@ class DetectionStatus(BaseModel):
     unknown_persons: int
     uptime_seconds: int
     frames_processed: int
+    demo_mode: bool = False
+    client_mode: bool = False
+    detection_classes: List[str] = []
 
 
-class PersonDetectionResponse(BaseModel):
+class ObjectDetectionResponse(BaseModel):
     track_id: int
+    class_id: int
+    class_name: str
     employee_id: Optional[int]
     name: str
     bbox: List[int]  # [x1, y1, x2, y2]
-    confidence: float
     duration_seconds: int
+    is_identified: bool
+    is_person: bool
+    is_vehicle: bool
+
+
+# Alias for backwards compatibility
+PersonDetectionResponse = ObjectDetectionResponse
 
 
 class DetectionFrame(BaseModel):
     timestamp: float
     frame_number: int
-    persons: List[PersonDetectionResponse]
+    detections: List[ObjectDetectionResponse]
     source_name: str
+    stats: dict = {}
 
 
 # Session schemas
