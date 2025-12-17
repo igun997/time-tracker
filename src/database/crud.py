@@ -13,8 +13,11 @@ async def create_employee(db: AsyncSession, name: str, employee_id: Optional[str
     employee = Employee(name=name, employee_id=employee_id)
     db.add(employee)
     await db.commit()
-    await db.refresh(employee)
-    return employee
+    # Refetch with face_encodings relationship eagerly loaded
+    result = await db.execute(
+        select(Employee).where(Employee.id == employee.id).options(selectinload(Employee.face_encodings))
+    )
+    return result.scalar_one()
 
 
 async def get_employee(db: AsyncSession, employee_pk: int) -> Optional[Employee]:
@@ -51,8 +54,8 @@ async def update_employee(db: AsyncSession, employee_pk: int, name: Optional[str
     if is_active is not None:
         employee.is_active = is_active
     await db.commit()
-    await db.refresh(employee)
-    return employee
+    # Refetch with face_encodings relationship eagerly loaded
+    return await get_employee(db, employee_pk)
 
 
 async def delete_employee(db: AsyncSession, employee_pk: int) -> bool:
