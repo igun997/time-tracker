@@ -1,0 +1,260 @@
+from datetime import datetime, date
+from typing import Optional, List
+import numpy as np
+from sqlalchemy import select, and_, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from .models import Employee, FaceEncoding, Session, TimeLog, VideoSource
+
+
+# Employee CRUD
+async def create_employee(db: AsyncSession, name: str, employee_id: Optional[str] = None) -> Employee:
+    employee = Employee(name=name, employee_id=employee_id)
+    db.add(employee)
+    await db.commit()
+    await db.refresh(employee)
+    return employee
+
+
+async def get_employee(db: AsyncSession, employee_pk: int) -> Optional[Employee]:
+    result = await db.execute(
+        select(Employee).where(Employee.id == employee_pk).options(selectinload(Employee.face_encodings))
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_employee_by_employee_id(db: AsyncSession, employee_id: str) -> Optional[Employee]:
+    result = await db.execute(
+        select(Employee).where(Employee.employee_id == employee_id)
+    )
+    return result.scalar_one_or_none()
+
+
+async def get_all_employees(db: AsyncSession, active_only: bool = True) -> List[Employee]:
+    query = select(Employee).options(selectinload(Employee.face_encodings))
+    if active_only:
+        query = query.where(Employee.is_active == True)
+    result = await db.execute(query.order_by(Employee.name))
+    return list(result.scalars().all())
+
+
+async def update_employee(db: AsyncSession, employee_pk: int, name: Optional[str] = None,
+                          employee_id: Optional[str] = None, is_active: Optional[bool] = None) -> Optional[Employee]:
+    employee = await get_employee(db, employee_pk)
+    if not employee:
+        return None
+    if name is not None:
+        employee.name = name
+    if employee_id is not None:
+        employee.employee_id = employee_id
+    if is_active is not None:
+        employee.is_active = is_active
+    await db.commit()
+    await db.refresh(employee)
+    return employee
+
+
+async def delete_employee(db: AsyncSession, employee_pk: int) -> bool:
+    employee = await get_employee(db, employee_pk)
+    if not employee:
+        return False
+    await db.delete(employee)
+    await db.commit()
+    return True
+
+
+# Face Encoding CRUD
+async def add_face_encoding(db: AsyncSession, employee_pk: int, encoding: np.ndarray,
+                            photo_path: Optional[str] = None) -> FaceEncoding:
+    face_encoding = FaceEncoding(
+        employee_id=employee_pk,
+        encoding=encoding.tobytes(),
+        photo_path=photo_path
+    )
+    db.add(face_encoding)
+    await db.commit()
+    await db.refresh(face_encoding)
+    return face_encoding
+
+
+async def get_all_face_encodings(db: AsyncSession) -> List[tuple]:
+    """Returns list of (employee_id, employee_name, encoding_array)"""
+    result = await db.execute(
+        select(FaceEncoding, Employee.name)
+        .join(Employee)
+        .where(Employee.is_active == True)
+    )
+    encodings = []
+    for face_encoding, name in result.all():
+        encoding_array = np.frombuffer(face_encoding.encoding, dtype=np.float64)
+        encodings.append((face_encoding.employee_id, name, encoding_array))
+    return encodings
+
+
+async def delete_face_encoding(db: AsyncSession, encoding_id: int) -> bool:
+    result = await db.execute(select(FaceEncoding).where(FaceEncoding.id == encoding_id))
+    face_encoding = result.scalar_one_or_none()
+    if not face_encoding:
+        return False
+    await db.delete(face_encoding)
+    await db.commit()
+    return True
+
+
+# Session CRUD
+async def create_session(db: AsyncSession, source_name: str, employee_pk: Optional[int] = None,
+                         unknown_person_id: Optional[str] = None) -> Session:
+    session = Session(
+        employee_id=employee_pk,
+        unknown_person_id=unknown_person_id,
+        source_name=source_name,
+        start_time=datetime.utcnow(),
+        session_date=date.today()
+    )
+    db.add(session)
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
+async def end_session(db: AsyncSession, session_id: int) -> Optional[Session]:
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if not session:
+        return None
+    session.end_time = datetime.utcnow()
+    await db.commit()
+    await db.refresh(session)
+    return session
+
+
+async def get_active_sessions(db: AsyncSession, source_name: Optional[str] = None) -> List[Session]:
+    query = select(Session).where(Session.end_time == None)
+    if source_name:
+        query = query.where(Session.source_name == source_name)
+    result = await db.execute(query.options(selectinload(Session.employee)))
+    return list(result.scalars().all())
+
+
+async def get_sessions_by_date(db: AsyncSession, log_date: date,
+                               employee_pk: Optional[int] = None) -> List[Session]:
+    query = select(Session).where(Session.session_date == log_date)
+    if employee_pk:
+        query = query.where(Session.employee_id == employee_pk)
+    result = await db.execute(query.options(selectinload(Session.employee)).order_by(Session.start_time))
+    return list(result.scalars().all())
+
+
+# Time Log CRUD
+async def update_time_log(db: AsyncSession, employee_pk: int, source_name: str,
+                          log_date: date, duration_seconds: int) -> TimeLog:
+    result = await db.execute(
+        select(TimeLog).where(
+            and_(
+                TimeLog.employee_id == employee_pk,
+                TimeLog.log_date == log_date,
+                TimeLog.source_name == source_name
+            )
+        )
+    )
+    time_log = result.scalar_one_or_none()
+
+    if time_log:
+        time_log.total_seconds += duration_seconds
+    else:
+        time_log = TimeLog(
+            employee_id=employee_pk,
+            log_date=log_date,
+            total_seconds=duration_seconds,
+            source_name=source_name
+        )
+        db.add(time_log)
+
+    await db.commit()
+    await db.refresh(time_log)
+    return time_log
+
+
+async def get_daily_report(db: AsyncSession, log_date: date) -> List[dict]:
+    """Get aggregated time for all employees on a specific date"""
+    result = await db.execute(
+        select(
+            Employee.id,
+            Employee.name,
+            Employee.employee_id,
+            func.sum(TimeLog.total_seconds).label('total_seconds')
+        )
+        .join(TimeLog)
+        .where(TimeLog.log_date == log_date)
+        .group_by(Employee.id)
+        .order_by(Employee.name)
+    )
+
+    report = []
+    for row in result.all():
+        total_seconds = row.total_seconds or 0
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        report.append({
+            'employee_id': row.id,
+            'name': row.name,
+            'employee_code': row.employee_id,
+            'total_seconds': total_seconds,
+            'formatted_duration': f"{hours:02d}:{minutes:02d}"
+        })
+    return report
+
+
+async def get_employee_time_history(db: AsyncSession, employee_pk: int,
+                                    start_date: date, end_date: date) -> List[TimeLog]:
+    result = await db.execute(
+        select(TimeLog)
+        .where(
+            and_(
+                TimeLog.employee_id == employee_pk,
+                TimeLog.log_date >= start_date,
+                TimeLog.log_date <= end_date
+            )
+        )
+        .order_by(TimeLog.log_date.desc())
+    )
+    return list(result.scalars().all())
+
+
+# Video Source CRUD
+async def create_video_source(db: AsyncSession, name: str, source_type: str,
+                              source_url: Optional[str] = None,
+                              device_index: Optional[int] = None) -> VideoSource:
+    source = VideoSource(
+        name=name,
+        source_type=source_type,
+        source_url=source_url,
+        device_index=device_index
+    )
+    db.add(source)
+    await db.commit()
+    await db.refresh(source)
+    return source
+
+
+async def get_all_video_sources(db: AsyncSession, active_only: bool = True) -> List[VideoSource]:
+    query = select(VideoSource)
+    if active_only:
+        query = query.where(VideoSource.is_active == True)
+    result = await db.execute(query.order_by(VideoSource.name))
+    return list(result.scalars().all())
+
+
+async def get_video_source(db: AsyncSession, source_id: int) -> Optional[VideoSource]:
+    result = await db.execute(select(VideoSource).where(VideoSource.id == source_id))
+    return result.scalar_one_or_none()
+
+
+async def delete_video_source(db: AsyncSession, source_id: int) -> bool:
+    source = await get_video_source(db, source_id)
+    if not source:
+        return False
+    await db.delete(source)
+    await db.commit()
+    return True

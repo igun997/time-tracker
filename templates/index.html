@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YOLO Time Tracker</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>YOLO Time Tracker</h1>
+            <div class="status-bar">
+                <span id="connection-status" class="status-badge disconnected">Disconnected</span>
+                <span id="detection-status" class="status-badge stopped">Detection Stopped</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Video Panel -->
+            <section class="video-panel">
+                <div class="video-container">
+                    <img id="video-feed" src="" alt="Video Feed" class="video-feed">
+                    <div id="video-placeholder" class="video-placeholder">
+                        <p>No video stream</p>
+                        <p class="hint">Select a source and start detection</p>
+                    </div>
+                </div>
+                <div class="video-stats">
+                    <div class="stat">
+                        <span class="stat-label">FPS</span>
+                        <span id="stat-fps" class="stat-value">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Persons</span>
+                        <span id="stat-persons" class="stat-value">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Identified</span>
+                        <span id="stat-identified" class="stat-value">0</span>
+                    </div>
+                    <div class="stat">
+                        <span class="stat-label">Uptime</span>
+                        <span id="stat-uptime" class="stat-value">00:00</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Control Panel -->
+            <section class="control-panel">
+                <!-- Detection Controls -->
+                <div class="panel">
+                    <h2>Detection Controls</h2>
+                    <div class="form-group">
+                        <label for="source-select">Video Source</label>
+                        <select id="source-select">
+                            <option value="">Select source...</option>
+                        </select>
+                        <button id="refresh-sources" class="btn btn-small">Refresh</button>
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="demo-mode"> Demo Mode (no YOLO required)
+                        </label>
+                    </div>
+                    <div class="button-group">
+                        <button id="start-detection" class="btn btn-primary">Start Detection</button>
+                        <button id="stop-detection" class="btn btn-danger" disabled>Stop Detection</button>
+                    </div>
+                </div>
+
+                <!-- Active Persons -->
+                <div class="panel">
+                    <h2>Active Persons</h2>
+                    <div id="persons-list" class="persons-list">
+                        <p class="empty-message">No persons detected</p>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="panel">
+                    <h2>Quick Actions</h2>
+                    <div class="button-group vertical">
+                        <button id="btn-add-source" class="btn">Add Video Source</button>
+                        <button id="btn-add-employee" class="btn">Register Employee</button>
+                        <button id="btn-view-report" class="btn">View Today's Report</button>
+                    </div>
+                </div>
+            </section>
+        </main>
+
+        <!-- Tabs Section -->
+        <section class="tabs-section">
+            <div class="tabs">
+                <button class="tab active" data-tab="employees">Employees</button>
+                <button class="tab" data-tab="sources">Sources</button>
+                <button class="tab" data-tab="reports">Reports</button>
+                <button class="tab" data-tab="events">Events</button>
+            </div>
+
+            <!-- Employees Tab -->
+            <div id="tab-employees" class="tab-content active">
+                <div class="tab-header">
+                    <h3>Registered Employees</h3>
+                    <button id="btn-new-employee" class="btn btn-primary">+ Add Employee</button>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Employee ID</th>
+                            <th>Faces</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="employees-table-body">
+                        <tr><td colspan="5" class="empty-message">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Sources Tab -->
+            <div id="tab-sources" class="tab-content">
+                <div class="tab-header">
+                    <h3>Video Sources</h3>
+                    <button id="btn-new-source" class="btn btn-primary">+ Add Source</button>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Type</th>
+                            <th>URL/Device</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="sources-table-body">
+                        <tr><td colspan="5" class="empty-message">Loading...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Reports Tab -->
+            <div id="tab-reports" class="tab-content">
+                <div class="tab-header">
+                    <h3>Time Tracking Reports</h3>
+                    <div class="date-picker">
+                        <input type="date" id="report-date" value="">
+                        <button id="btn-load-report" class="btn">Load Report</button>
+                    </div>
+                </div>
+                <div id="report-content">
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>Employee</th>
+                                <th>Total Time</th>
+                                <th>Decimal Hours</th>
+                            </tr>
+                        </thead>
+                        <tbody id="report-table-body">
+                            <tr><td colspan="3" class="empty-message">Select a date and load report</td></tr>
+                        </tbody>
+                    </table>
+                    <div class="report-summary" id="report-summary"></div>
+                </div>
+            </div>
+
+            <!-- Events Tab -->
+            <div id="tab-events" class="tab-content">
+                <div class="tab-header">
+                    <h3>Session Events</h3>
+                    <button id="btn-clear-events" class="btn">Clear</button>
+                </div>
+                <div id="events-log" class="events-log">
+                    <p class="empty-message">No events yet</p>
+                </div>
+            </div>
+        </section>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal" class="modal hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modal-title">Modal Title</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div id="modal-body" class="modal-body">
+                <!-- Dynamic content -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
